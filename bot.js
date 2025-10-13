@@ -40,11 +40,11 @@ export async function postLinkedInComment(postUrl, commentText) {
     });
   console.log("Checking if already logged in...");
   await page.goto("https://www.linkedin.com/feed", { 
-    waitUntil: 'domcontentloaded',
-    timeout: 30000 
+    waitUntil: 'networkidle2',
+    timeout: 60000 
   });
   
-  await delay(1000);
+  await delay(2000);
   let currentUrl = page.url();
   console.log(`Current URL: ${currentUrl}`);
   
@@ -53,26 +53,72 @@ export async function postLinkedInComment(postUrl, commentText) {
     
     console.log("Navigating to LinkedIn login page...");
     await page.goto("https://www.linkedin.com/login", { 
-      waitUntil: 'domcontentloaded',
-      timeout: 30000 
+      waitUntil: 'networkidle2',
+      timeout: 60000 
     });
     
-    console.log("Looking for username field...");
-    const usernameSelector = '#username';
-    const passwordSelector = '#password';
+    await delay(2000);
     
-    try {
-      await page.waitForSelector(usernameSelector, { timeout: 10000 });
-    } catch (err) {
-      console.log("Could not find username field, taking screenshot...");
+    console.log("Looking for username field...");
+    const possibleUsernameSelectors = [
+      '#username',
+      'input[name="session_key"]',
+      'input[type="email"]',
+      'input[autocomplete="username"]',
+      '#session_key'
+    ];
+    
+    const possiblePasswordSelectors = [
+      '#password',
+      'input[name="session_password"]',
+      'input[type="password"]',
+      'input[autocomplete="current-password"]',
+      '#session_password'
+    ];
+    
+    let usernameSelector = null;
+    let passwordSelector = null;
+    
+    // Try to find username field
+    for (const selector of possibleUsernameSelectors) {
+      try {
+        await page.waitForSelector(selector, { timeout: 5000 });
+        usernameSelector = selector;
+        console.log(`Found username field with selector: ${selector}`);
+        break;
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    // Try to find password field
+    for (const selector of possiblePasswordSelectors) {
+      try {
+        await page.waitForSelector(selector, { timeout: 5000 });
+        passwordSelector = selector;
+        console.log(`Found password field with selector: ${selector}`);
+        break;
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    if (!usernameSelector || !passwordSelector) {
+      console.log("Could not find login fields, taking screenshot...");
       await page.screenshot({ path: 'login-page-debug.png', fullPage: true });
-      throw new Error(`Username field not found. Screenshot saved as login-page-debug.png`);
+      
+      // Get page content for debugging
+      const pageContent = await page.content();
+      console.log("Page title:", await page.title());
+      
+      throw new Error(`Login fields not found. Username: ${!!usernameSelector}, Password: ${!!passwordSelector}. Screenshot saved.`);
     }
     
     console.log("Entering credentials...");
-    await page.type(usernameSelector, username, { delay: 50 });
-    await page.type(passwordSelector, password, { delay: 50 });
-    await delay(300);
+    await page.type(usernameSelector, username, { delay: 100 });
+    await delay(500);
+    await page.type(passwordSelector, password, { delay: 100 });
+    await delay(1000);
     
     console.log("Clicking submit button...");
     await page.click("[type=submit]");
@@ -107,13 +153,18 @@ export async function postLinkedInComment(postUrl, commentText) {
   
   console.log("Logged in successfully! Navigating to post...");
   try {
-    await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(postUrl, { waitUntil: 'networkidle2', timeout: 60000 });
   } catch (navError) {
-    console.log("Navigation timeout, but continuing - page may have loaded...");
+    console.log("Navigation timeout, trying with domcontentloaded...");
+    try {
+      await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } catch (secondError) {
+      console.log("Second navigation attempt timed out, continuing anyway...");
+    }
   }
   
-  console.log("Waiting for page to load...");
-  await delay(2000);
+  console.log("Waiting for page to load completely...");
+  await delay(3000);
   
   console.log("Scrolling down to comments section...");
   await page.evaluate(() => {

@@ -168,9 +168,44 @@ export async function postLinkedInComment(postUrl, commentText) {
   
   console.log("Scrolling down to comments section...");
   await page.evaluate(() => {
-    window.scrollBy(0, 400);
+    window.scrollBy(0, 600);
   });
-  await delay(1000);
+  await delay(2000);
+  
+  // First, try to click the "Add a comment" button to activate the comment box
+  console.log("Looking for 'Add a comment' button...");
+  const commentTriggerSelectors = [
+    '.comments-comment-box__comment-text-trigger',
+    '.comments-comment-box-comment__text-editor',
+    'button[aria-label*="Add a comment"]',
+    '[data-control-name*="comment"]',
+    '.comments-comment-box__container',
+    '.comment-button',
+    'button:has-text("Add a comment")'
+  ];
+  
+  let commentBoxActivated = false;
+  for (const selector of commentTriggerSelectors) {
+    try {
+      const element = await page.$(selector);
+      if (element) {
+        const isVisible = await element.isVisible().catch(() => false);
+        if (isVisible) {
+          console.log(`Clicking comment trigger: ${selector}`);
+          await element.click();
+          await delay(1500);
+          commentBoxActivated = true;
+          break;
+        }
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+  
+  if (!commentBoxActivated) {
+    console.log("Comment trigger not needed or not found, looking directly for comment box...");
+  }
   
   console.log("Looking for comment box...");
   const possibleSelectors = [
@@ -178,53 +213,90 @@ export async function postLinkedInComment(postUrl, commentText) {
     '.comments-comment-box__editor',
     'div[role="textbox"]',
     '[data-placeholder*="comment"]',
-    '.comments-comment-texteditor'
+    '.comments-comment-texteditor',
+    '[contenteditable="true"]',
+    '.comments-comment-box__text-editor',
+    'div.ql-editor.ql-blank',
+    'div[data-placeholder="Add a comment…"]',
+    '[aria-label*="Add a comment"]',
+    '.editor-content[contenteditable="true"]'
   ];
   
   let commentBoxSelector = null;
   let commentBoxElement = null;
   
-  for (const selector of possibleSelectors) {
-    try {
-      const elements = await page.$$(selector);
-      if (elements.length > 0) {
-        for (const el of elements) {
-          const isVisible = await el.isVisible();
-          if (isVisible) {
-            commentBoxSelector = selector;
-            commentBoxElement = el;
-            console.log(`Found comment box with selector: ${selector}`);
-            break;
+  // Try multiple times with delays
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (commentBoxSelector) break;
+    
+    console.log(`Attempt ${attempt + 1} to find comment box...`);
+    
+    for (const selector of possibleSelectors) {
+      try {
+        const elements = await page.$$(selector);
+        if (elements.length > 0) {
+          for (const el of elements) {
+            try {
+              const isVisible = await el.isVisible();
+              const boundingBox = await el.boundingBox();
+              
+              if (isVisible && boundingBox) {
+                commentBoxSelector = selector;
+                commentBoxElement = el;
+                console.log(`Found comment box with selector: ${selector}`);
+                break;
+              }
+            } catch (e) {
+              continue;
+            }
           }
+          if (commentBoxSelector) break;
         }
-        if (commentBoxSelector) break;
+      } catch (e) {
+        continue;
       }
-    } catch (e) {
-      continue;
+    }
+    
+    if (!commentBoxSelector && attempt < 2) {
+      console.log("Comment box not found yet, waiting and scrolling...");
+      await page.evaluate(() => window.scrollBy(0, 200));
+      await delay(2000);
     }
   }
   
-  if (commentBoxSelector) {
-    await page.waitForSelector(commentBoxSelector, { visible: true, timeout: 3000 });
-  }
-  
   if (!commentBoxSelector) {
-    console.log("Could not find comment box. Available selectors on page:");
-    const availableSelectors = await page.evaluate(() => {
-      const textboxes = document.querySelectorAll('[contenteditable="true"], div[role="textbox"]');
-      return Array.from(textboxes).map((el, i) => ({
+    console.log("Could not find comment box. Debugging information:");
+    
+    // Get all contenteditable elements
+    const availableElements = await page.evaluate(() => {
+      const editables = document.querySelectorAll('[contenteditable="true"], div[role="textbox"], .ql-editor');
+      return Array.from(editables).map((el, i) => ({
         index: i,
+        tagName: el.tagName,
         className: el.className,
-        placeholder: el.getAttribute('data-placeholder') || el.getAttribute('aria-label')
+        id: el.id,
+        placeholder: el.getAttribute('data-placeholder') || el.getAttribute('aria-label') || el.getAttribute('placeholder'),
+        visible: el.offsetParent !== null,
+        text: el.textContent?.trim().substring(0, 50)
       }));
     });
-    console.log(JSON.stringify(availableSelectors, null, 2));
-    throw new Error("Comment box not found with any known selector");
+    console.log("Available editable elements:", JSON.stringify(availableElements, null, 2));
+    
+    // Take screenshot
+    await page.screenshot({ path: 'comment-box-not-found.png', fullPage: true });
+    console.log("Screenshot saved as comment-box-not-found.png");
+    
+    throw new Error("Comment box not found with any known selector. Check comment-box-not-found.png for debugging.");
   }
   
   console.log("Clicking on comment box...");
-  await page.click(commentBoxSelector);
-  await delay(500);
+  try {
+    await commentBoxElement.click();
+  } catch (e) {
+    // Try clicking with page.click as fallback
+    await page.click(commentBoxSelector);
+  }
+  await delay(1000);
   
   console.log(`Typing comment: "${commentText}"`);
   await page.type(commentBoxSelector, commentText, { delay: 50 });

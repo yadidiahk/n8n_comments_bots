@@ -203,7 +203,11 @@ export async function postLinkedInComment(postUrl, commentText) {
   // First, try to click the "Add a comment" button to activate the comment box
   console.log("Looking for 'Add a comment' button...");
   const commentTriggerSelectors = [
-    // Updated 2024-2025 selectors
+    // 2025 Updated selectors - try clicking the comment input area
+    '.comments-comment-box',
+    '.comments-comment-box__form',
+    '.comments-comment-box-comment__form',
+    '.comments-comment-texteditor',
     '.comments-comment-box__form-trigger',
     '.comments-comment-box-comment__form-trigger',
     '.comments-comment-box__comment-text-trigger',
@@ -213,9 +217,13 @@ export async function postLinkedInComment(postUrl, commentText) {
     // Older selectors
     '.comments-comment-box-comment__text-editor',
     'button[aria-label*="Add a comment"]',
+    'button[aria-label*="Comment"]',
     '[data-control-name*="comment"]',
     '.comments-comment-box__container',
-    '.comment-button'
+    '.comment-button',
+    
+    // Try clicking anywhere in the comment area
+    '[class*="comments-comment-box"]'
   ];
   
   let commentBoxActivated = false;
@@ -227,9 +235,19 @@ export async function postLinkedInComment(postUrl, commentText) {
         if (isVisible) {
           console.log(`Clicking comment trigger: ${selector}`);
           await element.click();
-          await delay(1500);
+          await delay(2000);
           commentBoxActivated = true;
-          break;
+          
+          // Check if contenteditable appeared after click
+          const hasContentEditable = await page.evaluate(() => {
+            const editables = document.querySelectorAll('[contenteditable="true"]');
+            return editables.length > 0;
+          });
+          
+          if (hasContentEditable) {
+            console.log("Comment box activated successfully!");
+            break;
+          }
         }
       }
     } catch (e) {
@@ -239,38 +257,49 @@ export async function postLinkedInComment(postUrl, commentText) {
   
   if (!commentBoxActivated) {
     console.log("Comment trigger not needed or not found, looking directly for comment box...");
+  } else {
+    // Give extra time for the editor to fully load
+    await delay(1000);
   }
   
   console.log("Looking for comment box...");
   const possibleSelectors = [
-    // Updated 2024-2025 selectors
+    // 2025 Most common selectors first
+    '.ql-editor[contenteditable="true"]:not(.ql-clipboard)',
     '.comments-comment-box-comment__text-editor .ql-editor',
     '.comments-comment-box__form .ql-editor',
-    '.ql-editor[contenteditable="true"]:not(.ql-clipboard)',
-    'div[data-test-id="comment-box-text-editor"]',
     '.comments-comment-texteditor .ql-editor',
+    'div[data-test-id="comment-box-text-editor"]',
     
-    // Older selectors (keeping for backward compatibility)
+    // Try finding by placeholder text
+    'div[data-placeholder="Add a comment…"]',
+    'div[data-placeholder*="comment" i]',
+    '[aria-label*="Add a comment" i]',
+    
+    // Generic ql-editor
     '.ql-editor:not(.ql-clipboard)',
-    '.comments-comment-box__editor',
+    'div.ql-editor',
+    
+    // By role
     'div[role="textbox"]',
-    '[data-placeholder*="comment"]',
+    '[role="textbox"][contenteditable="true"]',
+    
+    // Class-based searches
+    '.comments-comment-box__editor',
     '.comments-comment-texteditor',
     '.comments-comment-box__text-editor',
     'div.ql-editor.ql-blank',
-    'div[data-placeholder="Add a comment…"]',
-    '[aria-label*="Add a comment"]',
     '.editor-content[contenteditable="true"]',
     
-    // Generic contenteditable as last resort
-    '[contenteditable="true"]'
+    // Generic contenteditable (will match ANY contenteditable - filter later)
+    '[contenteditable="true"]:not(.ql-clipboard)'
   ];
   
   let commentBoxSelector = null;
   let commentBoxElement = null;
   
   // Try multiple times with delays
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     if (commentBoxSelector) break;
     
     console.log(`Attempt ${attempt + 1} to find comment box...`);
@@ -279,15 +308,34 @@ export async function postLinkedInComment(postUrl, commentText) {
       try {
         const elements = await page.$$(selector);
         if (elements.length > 0) {
+          console.log(`Found ${elements.length} element(s) matching: ${selector}`);
+          
           for (const el of elements) {
             try {
               const isVisible = await el.isVisible();
               const boundingBox = await el.boundingBox();
               
-              if (isVisible && boundingBox) {
+              // Check if element is in comments section
+              const isInCommentsSection = await el.evaluate(node => {
+                let parent = node.parentElement;
+                let maxDepth = 10;
+                while (parent && maxDepth > 0) {
+                  const className = parent.className || '';
+                  if (typeof className === 'string' && 
+                      (className.includes('comments-comment-box') || 
+                       className.includes('comment-texteditor'))) {
+                    return true;
+                  }
+                  parent = parent.parentElement;
+                  maxDepth--;
+                }
+                return false;
+              });
+              
+              if (isVisible && boundingBox && (isInCommentsSection || elements.length === 1)) {
                 commentBoxSelector = selector;
                 commentBoxElement = el;
-                console.log(`Found comment box with selector: ${selector}`);
+                console.log(`Found valid comment box with selector: ${selector}`);
                 break;
               }
             } catch (e) {
@@ -301,10 +349,26 @@ export async function postLinkedInComment(postUrl, commentText) {
       }
     }
     
-    if (!commentBoxSelector && attempt < 2) {
-      console.log("Comment box not found yet, waiting and scrolling...");
-      await page.evaluate(() => window.scrollBy(0, 200));
+    if (!commentBoxSelector && attempt < 3) {
+      console.log("Comment box not found yet, trying to activate it...");
+      
+      // Try clicking on comment box area with JavaScript
+      const clicked = await page.evaluate(() => {
+        const commentBoxContainers = document.querySelectorAll('[class*="comments-comment-box"]');
+        if (commentBoxContainers.length > 0) {
+          commentBoxContainers[0].click();
+          return true;
+        }
+        return false;
+      });
+      
+      if (clicked) {
+        console.log("Clicked on comment box container, waiting for editor...");
+      }
+      
       await delay(2000);
+      await page.evaluate(() => window.scrollBy(0, 100));
+      await delay(1000);
     }
   }
   
@@ -327,7 +391,19 @@ export async function postLinkedInComment(postUrl, commentText) {
           height: el.getBoundingClientRect().height,
           top: el.getBoundingClientRect().top
         } : null,
-        text: el.textContent?.trim().substring(0, 50)
+        text: el.textContent?.trim().substring(0, 50),
+        hasParentWithComment: (() => {
+          let parent = el.parentElement;
+          let depth = 0;
+          while (parent && depth < 10) {
+            if (parent.className && typeof parent.className === 'string' && parent.className.includes('comment')) {
+              return true;
+            }
+            parent = parent.parentElement;
+            depth++;
+          }
+          return false;
+        })()
       }));
     });
     console.log("Available editable elements:", JSON.stringify(availableElements, null, 2));

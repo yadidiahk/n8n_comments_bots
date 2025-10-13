@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+README.md
+DEPLOYMENT.md
+QUICK_START.md
+test-api.sh
+*.png
+*.md
+.DS_Store
+linkedin_profile/
+error-screenshot.png
+login-page-debug.png
+post-submit-screenshot.png
+

@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  linkedin-bot:
+    build: .
+    container_name: linkedin-bot-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - LINKEDIN_USER=${LINKEDIN_USER}
+      - LINKEDIN_PASS=${LINKEDIN_PASS}
+      - PORT=3000
+    volumes:
+      - ./linkedin_profile:/app/linkedin_profile
+    security_opt:
+      - seccomp:unconfined
+    shm_size: 2gb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+

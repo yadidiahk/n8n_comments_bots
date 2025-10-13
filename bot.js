@@ -20,7 +20,7 @@ export async function postLinkedInComment(postUrl, commentText) {
 
   try {
     browser = await puppeteer.launch({ 
-      headless: false, // Changed to false for debugging
+      headless: true, // Set to true for Docker deployment
       userDataDir: './linkedin_profile',
       args: [
         '--no-sandbox',

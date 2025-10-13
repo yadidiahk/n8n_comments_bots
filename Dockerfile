@@ -1,16 +1,22 @@
-FROM node:20-slim
+# Use Node.js LTS version with Debian base for better Puppeteer support
+FROM node:20-bullseye-slim
 
-# Install Chromium and dependencies for Puppeteer
+# Set working directory
+WORKDIR /app
+
+# Install dependencies required for Puppeteer/Chrome
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-sandbox \
     fonts-liberation \
+    libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
     libcups2 \
     libdbus-1-3 \
-    libgdk-pixbuf2.0-0 \
+    libdrm2 \
+    libgbm1 \
     libgtk-3-0 \
     libnspr4 \
     libnss3 \
@@ -18,39 +24,42 @@ RUN apt-get update && apt-get install -y \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
-    libxss1 \
-    libxtst6 \
     xdg-utils \
     ca-certificates \
-    fonts-noto-color-emoji \
+    wget \
+    --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Tell Puppeteer to use the installed Chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-
-# Create app directory
-WORKDIR /app
+# Set Puppeteer to use installed Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install Node.js dependencies
+RUN npm ci --only=production
 
 # Copy application files
-COPY . .
+COPY bot.js ./
+COPY server.js ./
+COPY youtube_bot.js ./
 
-# Create directory for browser profile
-RUN mkdir -p /app/linkedin_profile && chmod 777 /app/linkedin_profile
+# Create directories for browser profiles
+RUN mkdir -p /app/linkedin_profile /app/youtube_profile /app/tiktok_profile && \
+    chmod -R 777 /app/linkedin_profile /app/youtube_profile /app/tiktok_profile
 
-# Expose port
+# Expose the port the app runs on
 EXPOSE 3000
+
+# Set environment variables defaults (will be overridden by .env or docker-compose)
+ENV PORT=3000
+ENV NODE_ENV=production
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
-# Start the application
-CMD ["npm", "start"]
+# Run the application
+CMD ["node", "server.js"]
 

@@ -1,4 +1,6 @@
 import puppeteer from "puppeteer";
+import dotenv from 'dotenv';
+dotenv.config();
 
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -40,12 +42,16 @@ export async function postLinkedInComment(postUrl, commentText) {
       });
     });
   console.log("Checking if already logged in...");
-  await page.goto("https://www.linkedin.com/feed", { 
-    waitUntil: 'networkidle2',
-    timeout: 60000 
-  });
+  try {
+    await page.goto("https://www.linkedin.com/feed", { 
+      waitUntil: 'domcontentloaded',
+      timeout: 30000 
+    });
+  } catch (navError) {
+    console.log("Initial navigation timeout, but continuing to check login status...");
+  }
   
-  await delay(2000);
+  await delay(3000);
   let currentUrl = page.url();
   console.log(`Current URL: ${currentUrl}`);
   
@@ -53,12 +59,16 @@ export async function postLinkedInComment(postUrl, commentText) {
     console.log("Not logged in. Proceeding with login...");
     
     console.log("Navigating to LinkedIn login page...");
-    await page.goto("https://www.linkedin.com/login", { 
-      waitUntil: 'networkidle2',
-      timeout: 60000 
-    });
+    try {
+      await page.goto("https://www.linkedin.com/login", { 
+        waitUntil: 'domcontentloaded',
+        timeout: 30000 
+      });
+    } catch (navError) {
+      console.log("Login page navigation timeout, but continuing...");
+    }
     
-    await delay(2000);
+    await delay(3000);
     
     console.log("Looking for username field...");
     const possibleUsernameSelectors = [
@@ -154,14 +164,9 @@ export async function postLinkedInComment(postUrl, commentText) {
   
   console.log("Logged in successfully! Navigating to post...");
   try {
-    await page.goto(postUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
   } catch (navError) {
-    console.log("Navigation timeout, trying with domcontentloaded...");
-    try {
-      await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    } catch (secondError) {
-      console.log("Second navigation attempt timed out, continuing anyway...");
-    }
+    console.log("Navigation to post timed out, but continuing to attempt interaction...");
   }
   
   console.log("Waiting for page to load completely...");

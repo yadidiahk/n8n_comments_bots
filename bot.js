@@ -1,6 +1,5 @@
 import puppeteer from "puppeteer";
-import dotenv from 'dotenv';
-dotenv.config();
+
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 

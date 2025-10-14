@@ -62,9 +62,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 # Copy application files
-COPY bot.js ./
-COPY server.js ./
-COPY youtube_bot.js ./
+COPY . .
 
 # Create directories for browser profiles
 RUN mkdir -p /app/linkedin_profile /app/youtube_profile /app/tiktok_profile && \

@@ -6,8 +6,8 @@ dotenv.config();
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function postLinkedInComment(postUrl, commentText) {
-  const username = "ykanaparthi@humai.ae";//process.env.LINKEDIN_USER;
-  const password = "fatcoq-3xydci-puggyD";// process.env.LINKEDIN_PASS;
+  const username = process.env.LINKEDIN_USER;
+  const password = process.env.LINKEDIN_PASS;
 
   if (!username || !password) {
     throw new Error("LinkedIn credentials not found in environment variables");
@@ -36,7 +36,7 @@ export async function postLinkedInComment(postUrl, commentText) {
 
     await page.setViewport({ width: 1280, height: 800 });
 
-    await page.evaluateOnNewDocument(() => {
+    await page.evaluateOnNewDocument(() => { 
       Object.defineProperty(navigator, 'webdriver', {
         get: () => false,
       });

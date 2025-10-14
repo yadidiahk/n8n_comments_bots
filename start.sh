@@ -29,7 +29,7 @@ x11vnc -display ${XVFB_DISPLAY} -nopw -forever -shared -rfbport ${VNC_PORT} >/de
 sleep 1
 
 # Run noVNC on a separate port (6080)
-python3 ${NO_VNC_HOME}/utils/websockify/run --web ${NO_VNC_HOME} ${NOVNC_PORT} 127.0.0.1:${VNC_PORT} >/dev/null 2>&1 &
+python3 ${NO_VNC_HOME}/utils/websockify/run --web ${NO_VNC_HOME} 0.0.0.0:${NOVNC_PORT} 127.0.0.1:${VNC_PORT} >/dev/null 2>&1 &
 sleep 2
 
 echo "✅ noVNC running at: http://localhost:${NOVNC_PORT}/vnc.html"

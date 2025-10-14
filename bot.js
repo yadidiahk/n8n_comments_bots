@@ -38,7 +38,6 @@ export async function postLinkedInComment(postUrl, commentText) {
     ],
     defaultViewport: null
   });
-    browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint });
 
 
     page = await browser.newPage();

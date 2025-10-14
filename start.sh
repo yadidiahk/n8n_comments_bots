@@ -19,23 +19,32 @@ echo "noVNC Port:     ${NOVNC_PORT}"
 echo "App Port:       ${PORT}"
 echo "------------------------------------------"
 
+# Start X virtual framebuffer
 Xvfb ${XVFB_DISPLAY} -screen 0 ${SCREEN_WIDTH}x${SCREEN_HEIGHT}x${DEPTH} &
-sleep 1
-
-fluxbox >/dev/null 2>&1 &
-sleep 1
-
-x11vnc -display ${XVFB_DISPLAY} -nopw -forever -shared -rfbport ${VNC_PORT} >/dev/null 2>&1 &
-sleep 1
-
-# Run noVNC on a separate port (6080)
-python3 ${NO_VNC_HOME}/utils/websockify/run --web ${NO_VNC_HOME} 0.0.0.0:${NOVNC_PORT} 127.0.0.1:${VNC_PORT} >/dev/null 2>&1 &
 sleep 2
 
-echo "✅ noVNC running at: http://localhost:${NOVNC_PORT}/vnc.html"
-echo "------------------------------------------"
+# Start lightweight window manager
+fluxbox >/dev/null 2>&1 &
+sleep 2
 
-node server.js &
+# Start x11vnc for remote desktop access
+x11vnc -display ${XVFB_DISPLAY} -nopw -forever -shared -rfbport ${VNC_PORT} >/dev/null 2>&1 &
+sleep 2
+
+# Start noVNC using the correct launcher script
+echo "Starting noVNC..."
+bash ${NO_VNC_HOME}/utils/websockify/run --web ${NO_VNC_HOME} 0.0.0.0:${NOVNC_PORT} 127.0.0.1:${VNC_PORT} >/var/log/novnc.log 2>&1 &
+sleep 5
+
+# Start Node.js API server
+echo "Starting Node.js server..."
+node /app/server.js &
+
+echo "✅ All services started successfully!"
+echo "------------------------------------------"
+echo "Access API:   http://localhost:${PORT}/"
+echo "Access noVNC: http://localhost:${NOVNC_PORT}/vnc.html"
+echo "------------------------------------------"
 
 # Keep the container alive
 tail -f /dev/null

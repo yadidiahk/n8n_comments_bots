@@ -1,4 +1,6 @@
 import puppeteer from "puppeteer";
+import dotenv from "dotenv";
+dotenv.config();
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -476,26 +478,41 @@ export async function postYouTubeComment(videoUrl, commentText) {
       }
     }
     
-    const possibleSelectors = [
+    // Step 1: Click on comment box trigger to activate it
+    console.log("Looking for comment box trigger...");
+    const commentTriggerSelectors = [
       '#placeholder-area',
-      '#simple-box',
-      'ytd-comment-simplebox-renderer',
       '#simplebox-placeholder',
+      'ytd-comment-simplebox-renderer',
+      '#simple-box',
+      'ytd-comments-entry-point-header-renderer',
       '#comments-button ~ #comment-teaser',
-      'ytd-comments-entry-point-header-renderer'
+      'div[id="placeholder-area"]',
+      '[id*="simplebox"]'
     ];
     
-    let commentBoxSelector = null;
-    
-    for (const selector of possibleSelectors) {
+    let commentBoxActivated = false;
+    for (const selector of commentTriggerSelectors) {
       try {
         const element = await page.$(selector);
         if (element) {
-          const isVisible = await element.isVisible();
+          const isVisible = await element.isVisible().catch(() => false);
           if (isVisible) {
-            commentBoxSelector = selector;
-            console.log(`Found comment box area with selector: ${selector}`);
-            break;
+            console.log(`Clicking comment trigger: ${selector}`);
+            await element.click();
+            await delay(1500);
+            commentBoxActivated = true;
+            
+            // Check if contenteditable appeared after click
+            const hasContentEditable = await page.evaluate(() => {
+              const editables = document.querySelectorAll('[contenteditable="true"], #contenteditable-root');
+              return editables.length > 0;
+            });
+            
+            if (hasContentEditable) {
+              console.log("Comment box activated successfully!");
+              break;
+            }
           }
         }
       } catch (e) {
@@ -503,101 +520,126 @@ export async function postYouTubeComment(videoUrl, commentText) {
       }
     }
     
-    if (!commentBoxSelector) {
-      console.log("Could not find comment box area. Scrolling more...");
-      // Scroll to comments section to ensure it's loaded
-      try {
-        await page.evaluate(() => {
-          const commentsSection = document.querySelector('ytd-comments#comments, #comments');
-          if (commentsSection) {
-            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        });
-        await delay(1500);
-      } catch (e) {
-        console.log("Could not scroll to comments section");
-      }
+    if (!commentBoxActivated) {
+      console.log("Comment trigger not needed or not found, looking directly for comment field...");
+    } else {
+      await delay(1000);
+    }
+    
+    // Step 2: Find the actual editable field with retry logic
+    console.log("Looking for editable comment field...");
+    const possibleEditableSelectors = [
+      '#contenteditable-root',
+      'div[contenteditable="true"]#contenteditable-root',
+      'div[contenteditable="true"]',
+      '[contenteditable="true"]',
+      '#simplebox-placeholder',
+      'ytd-commentbox #contenteditable-root'
+    ];
+    
+    let editableSelector = null;
+    let editableElement = null;
+    
+    // Try multiple times with delays
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (editableSelector) break;
       
-      // Try finding the comment box again
-      for (const selector of possibleSelectors) {
+      console.log(`Attempt ${attempt + 1} to find comment field...`);
+      
+      for (const selector of possibleEditableSelectors) {
         try {
-          const element = await page.$(selector);
-          if (element) {
-            const isVisible = await element.isVisible();
-            if (isVisible) {
-              commentBoxSelector = selector;
-              console.log(`Found comment box area after scroll with selector: ${selector}`);
-              break;
+          const elements = await page.$$(selector);
+          if (elements.length > 0) {
+            console.log(`Found ${elements.length} element(s) matching: ${selector}`);
+            
+            for (const el of elements) {
+              try {
+                const isVisible = await el.isVisible();
+                const boundingBox = await el.boundingBox();
+                
+                if (isVisible && boundingBox) {
+                  editableSelector = selector;
+                  editableElement = el;
+                  console.log(`Found valid comment field with selector: ${selector}`);
+                  break;
+                }
+              } catch (e) {
+                continue;
+              }
             }
+            if (editableSelector) break;
           }
         } catch (e) {
           continue;
         }
       }
       
-      if (!commentBoxSelector) {
-        console.log("Still could not find comment box area. Taking screenshot...");
-        await page.screenshot({ path: 'youtube-before-click.png', fullPage: true });
-      }
-    }
-    
-    console.log("Clicking on comment box to activate it...");
-    if (commentBoxSelector) {
-      try {
-        await page.click(commentBoxSelector);
-        console.log(`Clicked on comment box using selector: ${commentBoxSelector}`);
-      } catch (e) {
-        console.log(`Could not click using ${commentBoxSelector}, trying alternatives...`);
-      }
-    }
-    
-    // Try alternative selectors if the first one didn't work
-    try {
-      await page.click('#placeholder-area');
-    } catch (e) {
-      try {
-        await page.click('ytd-comment-simplebox-renderer');
-      } catch (e2) {
-        try {
-          console.log("Trying to click comment input area...");
-          await page.click('#comments-button, ytd-comments-entry-point-header-renderer');
-        } catch (e3) {
-          console.log("Could not find any comment box to click. Continuing anyway...");
+      if (!editableSelector && attempt < 3) {
+        console.log("Comment field not found yet, trying to activate it...");
+        
+        // Try clicking on comment box area with JavaScript
+        const clicked = await page.evaluate(() => {
+          const triggers = [
+            document.querySelector('#placeholder-area'),
+            document.querySelector('ytd-comment-simplebox-renderer'),
+            document.querySelector('#simplebox-placeholder')
+          ];
+          
+          for (const trigger of triggers) {
+            if (trigger) {
+              trigger.click();
+              return true;
+            }
+          }
+          return false;
+        });
+        
+        if (clicked) {
+          console.log("Clicked on comment box container, waiting for editor...");
         }
-      }
-    }
-    await delay(800);
-    
-    console.log("Waiting for the editable comment field...");
-    
-    // Try multiple selectors for the comment input field
-    let editableSelector = '#contenteditable-root';
-    try {
-      await page.waitForSelector(editableSelector, { visible: true, timeout: 3000 });
-    } catch (e) {
-      try {
-        editableSelector = 'div[contenteditable="true"]';
-        await page.waitForSelector(editableSelector, { visible: true, timeout: 3000 });
-      } catch (e2) {
-        try {
-          editableSelector = '#simplebox-placeholder';
-          await page.waitForSelector(editableSelector, { visible: true, timeout: 3000 });
-        } catch (e3) {
-          console.log("Could not find editable field with any selector, trying default...");
-          editableSelector = '#contenteditable-root';
-        }
+        
+        await delay(1500);
       }
     }
     
-    console.log(`Using selector: ${editableSelector}`);
+    if (!editableSelector) {
+      console.log("Could not find comment field. Debugging information:");
+      console.log("Current URL:", page.url());
+      
+      // Get all contenteditable elements
+      const availableElements = await page.evaluate(() => {
+        const editables = document.querySelectorAll('[contenteditable="true"], #contenteditable-root, [id*="simplebox"]');
+        return Array.from(editables).map((el, i) => ({
+          index: i,
+          tagName: el.tagName,
+          id: el.id,
+          visible: el.offsetParent !== null,
+          boundingBox: el.getBoundingClientRect ? {
+            width: el.getBoundingClientRect().width,
+            height: el.getBoundingClientRect().height,
+            top: el.getBoundingClientRect().top
+          } : null
+        }));
+      });
+      console.log("Available editable elements:", JSON.stringify(availableElements, null, 2));
+      
+      await page.screenshot({ path: 'youtube-comment-field-not-found.png', fullPage: true });
+      console.log("Screenshot saved as youtube-comment-field-not-found.png");
+      
+      throw new Error("Comment field not found with any known selector. Check youtube-comment-field-not-found.png for debugging.");
+    }
     
     console.log("Clicking on the editable field...");
-    await page.click(editableSelector);
-    await delay(300);
+    try {
+      await editableElement.click();
+    } catch (e) {
+      await page.click(editableSelector);
+    }
+    await delay(500);
     
     console.log(`Typing comment: "${commentText}"`);
     await page.type(editableSelector, commentText, { delay: 30 });
-    await delay(300);
+    await delay(500);
     
     // Verify the text was actually entered
     const typedText = await page.evaluate((selector) => {
@@ -611,53 +653,148 @@ export async function postYouTubeComment(videoUrl, commentText) {
     }
     
     console.log("Waiting for submit button to be enabled...");
-    await delay(500);
+    await delay(1000);
     
     console.log("Looking for submit button...");
-    const submitButtonSelector = '#submit-button button';
+    const possibleButtonSelectors = [
+      '#submit-button button',
+      'ytd-button-renderer#submit-button button',
+      '#submit-button > ytd-button-renderer button',
+      'button[aria-label*="Comment"]',
+      'ytd-commentbox #submit-button button',
+      '[id="submit-button"] button'
+    ];
     
-    try {
-      await page.waitForSelector(submitButtonSelector, { visible: true, timeout: 4000 });
-    } catch (e) {
-      console.log("Could not find submit button with default selector, trying alternatives...");
-      await page.screenshot({ path: 'youtube-no-button.png', fullPage: true });
-      throw new Error("Submit button not found");
+    let submitButtonSelector = null;
+    let submitButtonElement = null;
+    
+    for (const selector of possibleButtonSelectors) {
+      try {
+        const elements = await page.$$(selector);
+        if (elements.length > 0) {
+          for (const el of elements) {
+            const isVisible = await el.isVisible().catch(() => false);
+            const isEnabled = await el.evaluate(node => 
+              !node.disabled && 
+              node.getAttribute('aria-disabled') !== 'true' && 
+              node.offsetParent !== null
+            ).catch(() => false);
+            
+            if (isVisible && isEnabled) {
+              submitButtonSelector = selector;
+              submitButtonElement = el;
+              console.log(`Found submit button with selector: ${selector}`);
+              break;
+            }
+          }
+          if (submitButtonSelector) break;
+        }
+      } catch (e) {
+        continue;
+      }
     }
     
-    // Check if button is enabled
-    const buttonEnabled = await page.evaluate((selector) => {
+    if (!submitButtonSelector) {
+      console.log("Could not find submit button. Available buttons on page:");
+      const availableButtons = await page.evaluate(() => {
+        const buttons = document.querySelectorAll('button, [role="button"]');
+        return Array.from(buttons).map((el, i) => ({
+          index: i,
+          id: el.id,
+          ariaLabel: el.getAttribute('aria-label'),
+          disabled: el.disabled,
+          ariaDisabled: el.getAttribute('aria-disabled'),
+          text: el.textContent?.trim().substring(0, 50),
+          visible: el.offsetParent !== null
+        })).filter(b => 
+          b.text?.toLowerCase().includes('comment') || 
+          b.ariaLabel?.toLowerCase().includes('comment') ||
+          b.id?.includes('submit')
+        );
+      });
+      console.log(JSON.stringify(availableButtons, null, 2));
+      
+      await page.screenshot({ path: 'youtube-no-button.png', fullPage: true });
+      throw new Error("Submit button not found or not enabled");
+    }
+    
+    console.log("Scrolling button into view...");
+    await page.evaluate((selector) => {
       const button = document.querySelector(selector);
-      return button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+      if (button) {
+        button.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     }, submitButtonSelector);
     
-    console.log(`Button enabled: ${buttonEnabled}`);
+    await delay(500);
     
-    if (!buttonEnabled) {
-      console.log("Submit button is disabled, waiting a bit longer...");
-      await delay(1000);
+    // Check button state before clicking
+    const buttonState = await page.evaluate((selector) => {
+      const button = document.querySelector(selector);
+      if (!button) return { found: false };
+      return {
+        found: true,
+        disabled: button.disabled,
+        ariaDisabled: button.getAttribute('aria-disabled'),
+        visible: button.offsetParent !== null,
+        text: button.textContent?.trim(),
+        ariaLabel: button.getAttribute('aria-label')
+      };
+    }, submitButtonSelector);
+    
+    console.log("Button state before click:", JSON.stringify(buttonState, null, 2));
+    
+    if (buttonState.disabled || buttonState.ariaDisabled === 'true') {
+      throw new Error("Submit button is still disabled! The comment might not be ready to post.");
     }
     
     console.log("Submitting comment...");
+    let clickSuccess = false;
+    
     try {
-      await page.click(submitButtonSelector);
-      console.log("Click executed");
+      await submitButtonElement.click();
+      console.log("Element click executed");
+      clickSuccess = true;
     } catch (clickError) {
-      console.log("Regular click failed, trying JavaScript click...");
-      await page.evaluate((selector) => {
-        const button = document.querySelector(selector);
-        if (button) {
-          button.click();
+      console.log("Element click failed, trying page.click...");
+      try {
+        await page.click(submitButtonSelector);
+        console.log("Page click executed");
+        clickSuccess = true;
+      } catch (clickError2) {
+        console.log("Page click failed, trying JavaScript click...");
+        try {
+          await page.evaluate((selector) => {
+            const button = document.querySelector(selector);
+            if (button) {
+              button.click();
+              return true;
+            }
+            return false;
+          }, submitButtonSelector);
+          console.log("JavaScript click executed");
+          clickSuccess = true;
+        } catch (jsClickError) {
+          console.error("All click methods failed:", jsClickError.message);
+          throw new Error("Failed to click submit button with any method");
         }
-      }, submitButtonSelector);
-      console.log("JavaScript click executed");
+      }
     }
     
     console.log("Waiting for comment to be posted...");
-    await delay(2000);
+    await delay(3000);
     
-    // Verify the comment was posted by checking if it appears in the comments
+    // Verify the comment was posted by checking if the comment box is now empty
+    const commentBoxAfterSubmit = await page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      return element ? element.innerText || element.textContent : null;
+    }, editableSelector);
+    
+    console.log(`Comment box after submit: "${commentBoxAfterSubmit}"`);
+    
+    // Check if our comment appears in the comments list
     const commentAppeared = await page.evaluate((commentTextParam) => {
-      const comments = Array.from(document.querySelectorAll('ytd-comment-renderer #content-text'));
+      const comments = Array.from(document.querySelectorAll('ytd-comment-renderer #content-text, ytd-comment-renderer yt-attributed-string'));
       return comments.some(comment => {
         const text = comment.innerText || comment.textContent;
         return text && text.trim().includes(commentTextParam.trim());
@@ -666,10 +803,13 @@ export async function postYouTubeComment(videoUrl, commentText) {
     
     if (commentAppeared) {
       console.log("SUCCESS! Comment verified to appear in the comments section!");
+    } else if (!commentBoxAfterSubmit || commentBoxAfterSubmit.trim() === '' || commentBoxAfterSubmit.trim().length < 5) {
+      console.log("Comment box is empty - comment likely posted successfully!");
     } else {
-      console.log("WARNING: Could not verify comment in the page. It may still have been posted.");
+      console.log("WARNING: Comment box still contains text. Comment may not have been posted.");
       console.log("Taking screenshot for debugging...");
-      await page.screenshot({ path: 'youtube-post-submit.png', fullPage: true });
+      await page.screenshot({ path: 'youtube-post-submit-screenshot.png', fullPage: true });
+      throw new Error("Comment submission may have failed - comment box not cleared");
     }
     
     console.log("Comment posted successfully!");

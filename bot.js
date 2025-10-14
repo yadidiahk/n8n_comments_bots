@@ -25,19 +25,29 @@ export async function postLinkedInComment(postUrl, commentText) {
   try {
 
     console.log("Launching local Chrome in headful mode...");
-    browser = await puppeteer.launch({
-    headless: false, // 👈 Headful mode so you can see it in VNC
-    executablePath: process.env.CHROME_BIN || "/usr/bin/chromium",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--window-size=1280,800",
-      "--start-maximized"
-    ],
-    defaultViewport: null
-  });
+    
+    const launchOptions = {
+      headless: false, // Headful mode so you can see it in VNC
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--window-size=1280,800",
+        "--start-maximized"
+      ],
+      defaultViewport: null
+    };
+
+    // Only set executablePath if explicitly provided or on Linux
+    if (process.env.CHROME_BIN) {
+      launchOptions.executablePath = process.env.CHROME_BIN;
+    } else if (process.platform === 'linux') {
+      launchOptions.executablePath = '/usr/bin/chromium';
+    }
+    // On macOS and Windows, let Puppeteer find Chrome automatically
+
+    browser = await puppeteer.launch(launchOptions);
 
 
     page = await browser.newPage();

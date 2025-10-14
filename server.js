@@ -2,6 +2,9 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { postLinkedInComment } from './bot.js';
 import { postYouTubeComment } from './youtube_bot.js';
+import { postRedditComment } from './reddit_bot.js';
+import { postTwitterComment } from './twitter_bot.js';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 
 dotenv.config();
 
@@ -38,6 +41,30 @@ app.get('/', (req, res) => {
           'https://m.youtube.com/watch?v=VIDEO_ID',
           'https://www.youtube.com/embed/VIDEO_ID',
           'https://www.youtube.com/v/VIDEO_ID'
+        ]
+      },
+      reddit: {
+        path: '/api/reddit/comment',
+        method: 'POST',
+        body: {
+          postUrl: 'Reddit post URL',
+          comment: 'Comment text to post'
+        },
+        supportedUrlFormats: [
+          'https://www.reddit.com/r/subreddit/comments/POST_ID/...',
+          'https://old.reddit.com/r/subreddit/comments/POST_ID/...'
+        ]
+      },
+      twitter: {
+        path: '/api/twitter/comment',
+        method: 'POST',
+        body: {
+          tweetUrl: 'Twitter/X tweet URL',
+          comment: 'Reply text to post'
+        },
+        supportedUrlFormats: [
+          'https://twitter.com/username/status/TWEET_ID',
+          'https://x.com/username/status/TWEET_ID'
         ]
       },
       health: {
@@ -115,6 +142,79 @@ app.post('/api/youtube/comment', async (req, res) => {
     });
   }
 });
+
+app.post('/api/reddit/comment', async (req, res) => {
+  try {
+    const { postUrl, comment } = req.body;
+
+    if (!postUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'postUrl is required'
+      });
+    }
+
+    if (!comment) {
+      return res.status(400).json({
+        success: false,
+        error: 'comment is required'
+      });
+    }
+
+    console.log(`Received request to post Reddit comment on: ${postUrl}`);
+    
+    const result = await postRedditComment(postUrl, comment);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Reddit API Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/twitter/comment', async (req, res) => {
+  try {
+    const { tweetUrl, comment } = req.body;
+
+    if (!tweetUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'tweetUrl is required'
+      });
+    }
+
+    if (!comment) {
+      return res.status(400).json({
+        success: false,
+        error: 'comment is required'
+      });
+    }
+
+    console.log(`Received request to post Twitter reply on: ${tweetUrl}`);
+    
+    const result = await postTwitterComment(tweetUrl, comment);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Twitter API Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.use(['/vnc.html', '/vnc', '/vnc/'], createProxyMiddleware({
+  target: 'http://localhost:6080',
+  changeOrigin: true,
+  ws: true,
+  logLevel: 'silent'
+}));
+
+console.log("✅ Proxy for noVNC active at /vnc.html");
 
 app.listen(PORT, () => {
   console.log(`Social Media Comment Bot API running on port ${PORT}`);

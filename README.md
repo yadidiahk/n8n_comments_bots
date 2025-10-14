@@ -1,11 +1,13 @@
 # Social Media Comment Bot API
 
-A Node.js Express API for automating comments on LinkedIn and YouTube using Puppeteer.
+A Node.js Express API for automating comments on LinkedIn, YouTube, Reddit, and Twitter/X using Puppeteer.
 
 ## Features
 
 - ✅ Post comments on LinkedIn posts
 - ✅ Post comments on YouTube videos (including Shorts)
+- ✅ Post comments on Reddit posts
+- ✅ Post replies on Twitter/X tweets
 - ✅ Support for all YouTube URL formats
 - ✅ Persistent browser sessions (stay logged in)
 - ✅ Automatic error handling with screenshots
@@ -44,6 +46,14 @@ LINKEDIN_PASS=your_linkedin_password
 # YouTube Credentials  
 YOUTUBE_USER=your_youtube_email@gmail.com
 YOUTUBE_PASS=your_youtube_password
+
+# Reddit Credentials
+REDDIT_USER=your_reddit_username
+REDDIT_PASS=your_reddit_password
+
+# Twitter/X Credentials
+TWITTER_USER=your_twitter_username_or_email
+TWITTER_PASS=your_twitter_password
 
 # Server Port (optional)
 PORT=3000
@@ -121,6 +131,54 @@ Content-Type: application/json
 }
 ```
 
+### Post Reddit Comment
+
+```http
+POST /api/reddit/comment
+Content-Type: application/json
+
+{
+  "postUrl": "https://www.reddit.com/r/subreddit/comments/abc123/post_title/",
+  "comment": "Great discussion! Thanks for sharing your thoughts."
+}
+```
+
+**Supports both new and old Reddit** - works with both `www.reddit.com` and `old.reddit.com` URLs.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Comment posted successfully!",
+  "postUrl": "...",
+  "comment": "..."
+}
+```
+
+### Post Twitter/X Reply
+
+```http
+POST /api/twitter/comment
+Content-Type: application/json
+
+{
+  "tweetUrl": "https://twitter.com/username/status/1234567890",
+  "comment": "Great tweet! Thanks for sharing."
+}
+```
+
+**Supports both twitter.com and x.com** - works with both domains.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Comment posted successfully!",
+  "tweetUrl": "...",
+  "comment": "..."
+}
+```
+
 ## Usage Examples
 
 ### cURL Examples
@@ -162,6 +220,26 @@ curl -X POST http://localhost:3000/api/youtube/comment \
   -d '{
     "videoUrl": "https://www.youtube.com/shorts/VIDEO_ID",
     "comment": "Love this short!"
+  }'
+```
+
+**Reddit:**
+```bash
+curl -X POST http://localhost:3000/api/reddit/comment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "postUrl": "https://www.reddit.com/r/technology/comments/abc123/post_title/",
+    "comment": "Great discussion! Thanks for sharing."
+  }'
+```
+
+**Twitter/X:**
+```bash
+curl -X POST http://localhost:3000/api/twitter/comment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tweetUrl": "https://twitter.com/username/status/1234567890",
+    "comment": "Great insight! Thanks for sharing this."
   }'
 ```
 
@@ -223,18 +301,38 @@ Errors include helpful messages:
 
 When errors occur, the bot automatically saves screenshots:
 
+**YouTube:**
 - `youtube-error-screenshot.png` - General errors
 - `youtube-login-error.png` - Login page issues
 - `youtube-password-error.png` - Password field issues
-- `youtube-before-click.png` - Comment box issues
-- `youtube-post-submit.png` - Post-submission verification
+- `youtube-comment-field-not-found.png` - Comment box issues
+- `youtube-post-submit-screenshot.png` - Post-submission verification
+
+**Reddit:**
+- `reddit-error-screenshot.png` - General errors
+- `reddit-login-page-debug.png` - Login page issues
+- `reddit-comment-box-not-found.png` - Comment box issues
+- `reddit-post-submit-screenshot.png` - Post-submission verification
+
+**Twitter/X:**
+- `twitter-error-screenshot.png` - General errors
+- `twitter-login-page-debug.png` - Login page issues
+- `twitter-password-error.png` - Password field issues
+- `twitter-comment-box-not-found.png` - Comment box issues
+- `twitter-post-submit-screenshot.png` - Post-submission verification
+
+**LinkedIn:**
+- `error-screenshot.png` - General errors
+- `login-page-debug.png` - Login page issues
+- `comment-box-not-found.png` - Comment box issues
 
 ## Browser Profiles
 
-The bots maintain persistent browser sessions:
+The bots maintain persistent browser sessions (no need to login every time):
 
 - LinkedIn: `./linkedin_profile/`
 - YouTube: `./youtube_profile/`
+- Reddit: Browser uses default profile (will stay logged in)
 
 To clear sessions and start fresh:
 ```bash
@@ -284,11 +382,14 @@ lsof -ti:3000 | xargs kill -9
 app/
 ├── bot.js              # LinkedIn bot logic
 ├── youtube_bot.js      # YouTube bot logic
+├── reddit_bot.js       # Reddit bot logic
+├── twitter_bot.js      # Twitter/X bot logic
 ├── server.js           # Express API server
 ├── package.json        # Dependencies
 ├── .env               # Credentials (not in git)
 ├── test.js            # Simple test script
-├── test-url-formats.js # URL format tests
+├── test_youtube.js    # YouTube test script
+├── test_reddit.js     # Reddit test script
 ├── linkedin_profile/  # LinkedIn browser session
 └── youtube_profile/   # YouTube browser session
 ```
@@ -299,7 +400,7 @@ MIT
 
 ## Disclaimer
 
-Use this tool responsibly and in accordance with the Terms of Service of LinkedIn and YouTube. Automated interactions may violate these platforms' policies. Use at your own risk.
+Use this tool responsibly and in accordance with the Terms of Service of LinkedIn, YouTube, Reddit, and Twitter/X. Automated interactions may violate these platforms' policies. Use at your own risk.
 
 
 

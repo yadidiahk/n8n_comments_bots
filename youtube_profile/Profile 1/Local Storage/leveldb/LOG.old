@@ -1,2 +1,3 @@
-2025/10/14-10:15:34.791 8327e Creating DB /Users/yadidiah/Desktop/LeadGenCodes/app/youtube_profile/Profile 1/Local Storage/leveldb since it was missing.
-2025/10/14-10:15:34.797 8327e Reusing MANIFEST /Users/yadidiah/Desktop/LeadGenCodes/app/youtube_profile/Profile 1/Local Storage/leveldb/MANIFEST-000001
+2025/10/14-12:02:31.114 b878f Reusing MANIFEST /Users/yadidiah/Desktop/LeadGenCodes/app/youtube_profile/Profile 1/Local Storage/leveldb/MANIFEST-000001
+2025/10/14-12:02:31.120 b878f Recovering log #3
+2025/10/14-12:02:31.120 b878f Reusing old log /Users/yadidiah/Desktop/LeadGenCodes/app/youtube_profile/Profile 1/Local Storage/leveldb/000003.log 

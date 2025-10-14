@@ -28,6 +28,7 @@ export async function postLinkedInComment(postUrl, commentText) {
     
     const launchOptions = {
       headless: false, // Headful mode so you can see it in VNC
+      userDataDir: './linkedin_profile',
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",

@@ -1,9 +1,9 @@
 import puppeteer from "puppeteer";
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 dotenv.config();
 
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function postLinkedInComment(postUrl, commentText) {
   const username = process.env.LINKEDIN_USER;
@@ -17,20 +17,29 @@ export async function postLinkedInComment(postUrl, commentText) {
     throw new Error("Both postUrl and commentText are required");
   }
 
+  
   let browser;
   let page;
+  
 
   try {
-    browser = await puppeteer.launch({ 
-      headless: true, // Set to true for Docker deployment
-      userDataDir: './linkedin_profile',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled',
-        '--window-size=1280,800'
-      ]
-    });
+
+    console.log("Launching local Chrome in headful mode...");
+    browser = await puppeteer.launch({
+    headless: false, // 👈 Headful mode so you can see it in VNC
+    executablePath: process.env.CHROME_BIN || "/usr/bin/chromium",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--window-size=1280,800",
+      "--start-maximized"
+    ],
+    defaultViewport: null
+  });
+    browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint });
+
 
     page = await browser.newPage();
 
@@ -41,15 +50,15 @@ export async function postLinkedInComment(postUrl, commentText) {
         get: () => false,
       });
     });
-  console.log("Checking if already logged in...");
-  try {
-    await page.goto("https://www.linkedin.com/feed", { 
-      waitUntil: 'domcontentloaded',
-      timeout: 30000 
-    });
-  } catch (navError) {
-    console.log("Initial navigation timeout, but continuing to check login status...");
-  }
+      console.log("Checking if already logged in...");
+    try {
+      await page.goto("https://www.linkedin.com/feed", { 
+        waitUntil: 'domcontentloaded',
+        timeout: 30000 
+      });
+    } catch (navError) {
+      console.log("Initial navigation timeout, but continuing to check login status...");
+    }
   
   await delay(3000);
   let currentUrl = page.url();

@@ -303,17 +303,23 @@ export async function postYouTubeComment(videoUrl, commentText) {
         currentUrl = page.url();
         console.log(`Current URL after login: ${currentUrl}`);
         
+        // Wait for page to stabilize after login
+        console.log("Waiting for page to stabilize after login...");
+        await delay(3000);
+        
+        // Check if we need to navigate to the video
+        currentUrl = page.url();
         if (!currentUrl.includes(videoUrl.split('?')[0].split('#')[0])) {
           console.log("Navigating to video...");
           try {
             await page.goto(videoUrl, { 
-              waitUntil: 'domcontentloaded',
+              waitUntil: 'networkidle2',
               timeout: 30000 
             });
           } catch (navError) {
             console.log("Navigation timeout, but page may have loaded...");
           }
-          await delay(2000);
+          await delay(3000);
         }
         
         // Stop video playback after login
@@ -326,22 +332,25 @@ export async function postYouTubeComment(videoUrl, commentText) {
               video.muted = true;
             }
           });
+          await delay(500);
         } catch (e) {
-          console.log("Could not pause video");
+          console.log("Could not pause video:", e.message);
         }
         
         // Scroll down to trigger comments rendering after login
         console.log("Scrolling down to trigger comments rendering...");
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 5; i++) {
           try {
             await page.evaluate(() => {
-              window.scrollBy(0, 800);
+              window.scrollBy(0, 1000);
             });
-            await delay(300);
+            await delay(500);
           } catch (e) {
-            console.log(`Scroll after login ${i+1} failed, continuing anyway...`);
+            console.log(`Scroll after login ${i+1} failed: ${e.message}`);
           }
         }
+        
+        await delay(2000);
       } else {
         console.log("WARNING: Not on Google login page after navigation. Trying to proceed anyway...");
         console.log("The youtube_profile might have an invalid session. Consider deleting the youtube_profile directory.");
@@ -368,34 +377,41 @@ export async function postYouTubeComment(videoUrl, commentText) {
     // Close any popups/dialogs/overlays
     console.log("Closing any popups or overlays...");
     try {
-      const closeSelectors = [
-        'button[aria-label="Cancel"]',
-        'button[aria-label="Close"]',
-        '[aria-label="Dismiss"]',
-        '.style-scope.tp-yt-paper-dialog button',
-        'tp-yt-paper-dialog button[aria-label="No thanks"]',
-        'ytd-button-renderer button[aria-label="Dismiss"]'
-      ];
-      
-      for (const selector of closeSelectors) {
-        try {
-          const button = await page.$(selector);
-          if (button) {
-            const isVisible = await button.isVisible();
-            if (isVisible) {
-              await button.click();
-              console.log(`Closed popup with selector: ${selector}`);
-              await delay(300);
-              break;
+      // Make sure the page is still valid
+      if (!page.isClosed()) {
+        const closeSelectors = [
+          'button[aria-label="Cancel"]',
+          'button[aria-label="Close"]',
+          '[aria-label="Dismiss"]',
+          '.style-scope.tp-yt-paper-dialog button',
+          'tp-yt-paper-dialog button[aria-label="No thanks"]',
+          'ytd-button-renderer button[aria-label="Dismiss"]'
+        ];
+        
+        for (const selector of closeSelectors) {
+          try {
+            const button = await page.$(selector);
+            if (button) {
+              const isVisible = await button.isVisible();
+              if (isVisible) {
+                await button.click();
+                console.log(`Closed popup with selector: ${selector}`);
+                await delay(300);
+                break;
+              }
             }
+          } catch (e) {
+            continue;
           }
+        }
+        
+        try {
+          await page.keyboard.press('Escape');
+          await delay(300);
         } catch (e) {
-          continue;
+          console.log("Could not press Escape key");
         }
       }
-      
-      await page.keyboard.press('Escape');
-      await delay(300);
     } catch (e) {
       console.log("No popup to close or error closing:", e.message);
     }

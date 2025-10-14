@@ -64,7 +64,7 @@ export async function postYouTubeComment(videoUrl, commentText) {
 
   try {
     browser = await puppeteer.launch({ 
-      headless: true, // Set to true for deployment
+      headless: false, // Set to true for deployment
       userDataDir: './youtube_profile',
       args: [
         '--no-sandbox',
@@ -117,18 +117,18 @@ export async function postYouTubeComment(videoUrl, commentText) {
     
     // Scroll down immediately to trigger comments to render
     console.log("Scrolling down to trigger comments rendering...");
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       try {
         await page.evaluate(() => {
-          window.scrollBy(0, 800);
+          window.scrollBy(0, 1000);
         });
-        await delay(300);
+        await delay(400);
       } catch (e) {
         console.log(`Initial scroll ${i+1} failed, continuing anyway...`);
       }
     }
     
-    await delay(500);
+    await delay(1000);
     
     // Check if we're already logged in by looking for the user avatar or sign-in button
     const isLoggedIn = await page.evaluate(() => {
@@ -151,66 +151,38 @@ export async function postYouTubeComment(videoUrl, commentText) {
     if (!isLoggedIn) {
       console.log("Not logged in. Proceeding with login...");
       
-      console.log("Clicking sign in button...");
-      const signInButton = await page.$('a[aria-label="Sign in"]') || 
-                            await page.$('ytd-button-renderer a[href*="ServiceLogin"]');
+      // Navigate directly to Google login page with the video URL as the continue parameter
+      console.log("Navigating directly to Google login...");
+      const loginUrl = `https://accounts.google.com/ServiceLogin?service=youtube&hl=en&continue=${encodeURIComponent(videoUrl)}`;
       
-      if (signInButton) {
-        await signInButton.click();
+      console.log(`Login URL: ${loginUrl}`);
+      
+      try {
+        await page.goto(loginUrl, { 
+          waitUntil: 'load',
+          timeout: 60000 
+        });
+        console.log("Successfully navigated to Google login page");
         await delay(2000);
-        
-        // Check if we're now on Google login page
-        let currentUrl;
+      } catch (navErr) {
+        console.log(`Navigation error: ${navErr.message}`);
+        console.log("Trying again with networkidle0...");
         try {
-          currentUrl = page.url();
-          console.log(`Current URL: ${currentUrl}`);
-        } catch (e) {
-          console.log("Could not get URL after click, waiting...");
-          await delay(2000);
-          currentUrl = page.url();
-        }
-        
-        if (!currentUrl.includes('accounts.google.com')) {
-          console.log("Not redirected to login page. Checking login status again...");
-          try {
-            const recheckLogin = await page.evaluate(() => {
-              const avatar = document.querySelector('#avatar-btn') || 
-                             document.querySelector('yt-img-shadow#avatar');
-              return avatar !== null;
-            });
-            
-            if (recheckLogin) {
-              console.log("Actually already logged in! Continuing...");
-            } else {
-              console.log("Navigating directly to Google login...");
-              await page.goto("https://accounts.google.com/ServiceLogin?service=youtube", { 
-                waitUntil: 'domcontentloaded',
-                timeout: 30000 
-              });
-            }
-          } catch (evalError) {
-            console.log("Error checking login status, navigating to login page...");
-            await page.goto("https://accounts.google.com/ServiceLogin?service=youtube&hl=en&continue=https://www.youtube.com/", { 
-              waitUntil: 'domcontentloaded',
-              timeout: 30000 
-            });
-          }
-        }
-      } else {
-        console.log("Navigating directly to Google login...");
-        try {
-          // Use youtube.com in the continue URL, not the video URL directly
-          await page.goto("https://accounts.google.com/ServiceLogin?service=youtube&hl=en&continue=https://www.youtube.com/", { 
-            waitUntil: 'domcontentloaded',
-            timeout: 15000 
+          await page.goto(loginUrl, { 
+            waitUntil: 'networkidle0',
+            timeout: 60000 
           });
-        } catch (navErr) {
-          console.log("Navigation to login timed out, but continuing...");
+        } catch (navErr2) {
+          console.log(`Second navigation attempt failed: ${navErr2.message}`);
         }
       }
       
+      await delay(2000);
+      
       // Only proceed with login if we're on Google login page
       let currentUrl = page.url();
+      console.log(`Current URL after navigation: ${currentUrl}`);
+      
       if (currentUrl.includes('accounts.google.com')) {
         console.log("On Google login page, waiting for page to stabilize...");
         await delay(2000);
@@ -308,14 +280,14 @@ export async function postYouTubeComment(videoUrl, commentText) {
         console.log("Waiting for login to complete...");
         try {
           await page.waitForNavigation({ 
-            waitUntil: 'domcontentloaded', 
-            timeout: 15000 
+            waitUntil: 'networkidle2', 
+            timeout: 20000 
           });
         } catch (navError) {
           console.log("Navigation timeout - checking if we're logged in anyway...");
         }
         
-        await delay(1000);
+        await delay(3000);
         
         // Check if 2FA or verification is required
         const afterLoginUrl = page.url();
@@ -371,48 +343,20 @@ export async function postYouTubeComment(videoUrl, commentText) {
           }
         }
       } else {
-        console.log("Login process complete, checking current page...");
-        // Make sure we're on the video page
-        currentUrl = page.url();
-        if (!currentUrl.includes(videoUrl.split('?')[0].split('#')[0])) {
-          console.log("Not on video page, navigating there...");
-          try {
-            await page.goto(videoUrl, { 
-              waitUntil: 'domcontentloaded',
-              timeout: 30000 
-            });
-          } catch (navError) {
-            console.log("Navigation timeout, but continuing...");
-          }
-          await delay(2000);
-          
-          // Stop video playback
-          console.log("Stopping video playback...");
-          try {
-            await page.evaluate(() => {
-              const video = document.querySelector('video');
-              if (video) {
-                video.pause();
-                video.muted = true;
-              }
-            });
-          } catch (e) {
-            console.log("Could not pause video");
-          }
-          
-          // Scroll down to trigger comments rendering
-          console.log("Scrolling down to trigger comments rendering...");
-          for (let i = 0; i < 3; i++) {
-            try {
-              await page.evaluate(() => {
-                window.scrollBy(0, 800);
-              });
-              await delay(300);
-            } catch (e) {
-              console.log(`Scroll ${i+1} failed, continuing anyway...`);
-            }
-          }
+        console.log("WARNING: Not on Google login page after navigation. Trying to proceed anyway...");
+        console.log("The youtube_profile might have an invalid session. Consider deleting the youtube_profile directory.");
+        
+        // Try to navigate back to the video page and hope we get logged in somehow
+        console.log("Navigating back to video page...");
+        try {
+          await page.goto(videoUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: 30000 
+          });
+        } catch (e) {
+          console.log("Could not navigate to video");
         }
+        await delay(2000);
       }
     } else {
       console.log("Already logged in! Skipping login process.");
@@ -469,13 +413,13 @@ export async function postYouTubeComment(videoUrl, commentText) {
     
     console.log("Scrolling more to fully load comments section...");
     
-    // Scroll down a bit more to ensure comments are fully loaded
-    for (let i = 0; i < 2; i++) {
+    // Scroll down more aggressively to ensure comments are fully loaded
+    for (let i = 0; i < 4; i++) {
       try {
         await page.evaluate(() => {
-          window.scrollBy(0, 600);
+          window.scrollBy(0, 800);
         });
-        await delay(250);
+        await delay(400);
       } catch (e) {
         console.log(`Additional scroll ${i+1} failed, continuing anyway...`);
       }
@@ -544,19 +488,66 @@ export async function postYouTubeComment(videoUrl, commentText) {
     }
     
     if (!commentBoxSelector) {
-      console.log("Could not find comment box area. Taking screenshot...");
-      await page.screenshot({ path: 'youtube-before-click.png', fullPage: true });
+      console.log("Could not find comment box area. Scrolling more...");
+      // Scroll to comments section to ensure it's loaded
+      try {
+        await page.evaluate(() => {
+          const commentsSection = document.querySelector('ytd-comments#comments, #comments');
+          if (commentsSection) {
+            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+        await delay(1500);
+      } catch (e) {
+        console.log("Could not scroll to comments section");
+      }
+      
+      // Try finding the comment box again
+      for (const selector of possibleSelectors) {
+        try {
+          const element = await page.$(selector);
+          if (element) {
+            const isVisible = await element.isVisible();
+            if (isVisible) {
+              commentBoxSelector = selector;
+              console.log(`Found comment box area after scroll with selector: ${selector}`);
+              break;
+            }
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      
+      if (!commentBoxSelector) {
+        console.log("Still could not find comment box area. Taking screenshot...");
+        await page.screenshot({ path: 'youtube-before-click.png', fullPage: true });
+      }
     }
     
     console.log("Clicking on comment box to activate it...");
+    if (commentBoxSelector) {
+      try {
+        await page.click(commentBoxSelector);
+        console.log(`Clicked on comment box using selector: ${commentBoxSelector}`);
+      } catch (e) {
+        console.log(`Could not click using ${commentBoxSelector}, trying alternatives...`);
+      }
+    }
+    
+    // Try alternative selectors if the first one didn't work
     try {
       await page.click('#placeholder-area');
     } catch (e) {
       try {
         await page.click('ytd-comment-simplebox-renderer');
       } catch (e2) {
-        console.log("Trying to click comment input area...");
-        await page.click('#comments-button, ytd-comments-entry-point-header-renderer');
+        try {
+          console.log("Trying to click comment input area...");
+          await page.click('#comments-button, ytd-comments-entry-point-header-renderer');
+        } catch (e3) {
+          console.log("Could not find any comment box to click. Continuing anyway...");
+        }
       }
     }
     await delay(800);

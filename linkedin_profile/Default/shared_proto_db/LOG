@@ -1,3 +1,2 @@
-2025/10/13-17:43:20.296 3107b Reusing MANIFEST /Users/yadidiah/Desktop/LeadGenCodes/app/linkedin_profile/Default/shared_proto_db/MANIFEST-000001
-2025/10/13-17:43:20.296 3107b Recovering log #3
-2025/10/13-17:43:20.296 3107b Reusing old log /Users/yadidiah/Desktop/LeadGenCodes/app/linkedin_profile/Default/shared_proto_db/000003.log 
+2025/10/14-09:40:06.649 6ec2d Creating DB /Users/yadidiah/Desktop/LeadGenCodes/app/linkedin_profile/Default/shared_proto_db since it was missing.
+2025/10/14-09:40:06.651 6ec2d Reusing MANIFEST /Users/yadidiah/Desktop/LeadGenCodes/app/linkedin_profile/Default/shared_proto_db/MANIFEST-000001

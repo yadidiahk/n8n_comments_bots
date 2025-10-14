@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     ca-certificates \
     wget \
+    unzip \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -39,6 +40,7 @@ COPY package*.json ./
 
 # Install Node.js dependencies
 RUN npm ci --only=production
+# RUN if [ -f linkedin_profile.zip ]; then unzip -o linkedin_profile.zip -d .; fi
 
 # Copy application files
 COPY bot.js ./
@@ -48,6 +50,7 @@ COPY youtube_bot.js ./
 # Create directories for browser profiles
 RUN mkdir -p /app/linkedin_profile /app/youtube_profile /app/tiktok_profile && \
     chmod -R 777 /app/linkedin_profile /app/youtube_profile /app/tiktok_profile
+
 
 # Expose the port the app runs on
 EXPOSE 3000

@@ -1,3 +1,2 @@
-2025/10/13-17:43:20.019 3113a Reusing MANIFEST /Users/yadidiah/Desktop/LeadGenCodes/app/linkedin_profile/Default/Local Storage/leveldb/MANIFEST-000001
-2025/10/13-17:43:20.024 3113a Recovering log #3
-2025/10/13-17:43:20.024 3113a Reusing old log /Users/yadidiah/Desktop/LeadGenCodes/app/linkedin_profile/Default/Local Storage/leveldb/000003.log 
+2025/10/14-09:40:06.221 6ed31 Creating DB /Users/yadidiah/Desktop/LeadGenCodes/app/linkedin_profile/Default/Local Storage/leveldb since it was missing.
+2025/10/14-09:40:06.228 6ed31 Reusing MANIFEST /Users/yadidiah/Desktop/LeadGenCodes/app/linkedin_profile/Default/Local Storage/leveldb/MANIFEST-000001

@@ -75,7 +75,7 @@ COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
 # Expose the port Render will assign (noVNC will serve on this)
-EXPOSE 3000
+EXPOSE 3000 6080
 ENV PORT=3000
 ENV NODE_ENV=production
 

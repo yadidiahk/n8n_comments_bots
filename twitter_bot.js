@@ -17,9 +17,10 @@ const __dirname = path.dirname(__filename);
 const TOKENS_PATH = path.join(__dirname, "x_tokens.json");
 const PKCE_PATH = path.join(__dirname, "x_pkce.json");
 
+const OAUTH_PORT = 4000; // Unified OAuth port for all services
 const CLIENT_ID = process.env.X_CLIENT_ID;          // from developer portal
 const CLIENT_SECRET = process.env.X_CLIENT_SECRET;  // optional, for confidential clients
-const REDIRECT_URI = "http://localhost:3000/oauth2callback";
+const REDIRECT_URI = `http://localhost:${OAUTH_PORT}/twitter/callback`;
 
 // Scopes needed to post + keep refresh token
 const SCOPES = ["tweet.read", "tweet.write", "users.read", "offline.access"];
@@ -228,28 +229,42 @@ export function startAuthServer() {
   const authUrl = buildAuthUrl(pkce);
 
   app.get("/", (_req, res) => {
-    res.send(`<a href="${authUrl}">Authorize Twitter Bot</a>`);
+    res.send(`
+      <h1>OAuth Authentication Server</h1>
+      <h2>Twitter/X OAuth</h2>
+      <p><a href="${authUrl}">Authorize with Twitter/X</a></p>
+      <p>Or access: <a href="/twitter">/twitter</a></p>
+    `);
   });
 
-  app.get("/oauth2callback", async (req, res) => {
+  app.get("/twitter", (_req, res) => {
+    res.send(`<a href="${authUrl}">Authorize with Twitter/X</a>`);
+  });
+
+  app.get("/twitter/callback", async (req, res) => {
     try {
       const { code, state } = req.query;
       const saved = readJSON(PKCE_PATH);
       if (!saved || saved.state !== state) throw new Error("Invalid or mismatched state.");
 
       const tokens = await exchangeCodeForTokens(code);
-      console.log("Access token saved. Has refresh_token:", !!tokens.refresh_token);
-      res.send("Authorization complete! You can close this tab.");
+      console.log("✅ Twitter Access token saved. Has refresh_token:", !!tokens.refresh_token);
+      res.send("✅ Twitter/X Authorization complete! Tokens saved to x_tokens.json. You can close this tab.");
     } catch (e) {
       console.error(e);
-      res.status(500).send(`OAuth error: ${e.message}`);
+      res.status(500).send(`❌ OAuth error: ${e.message}`);
     }
   });
 
-  const port = Number(process.env.PORT) || 3000;
-  app.listen(port, async () => {
-    console.log(`Open ${REDIRECT_URI.replace("/oauth2callback", "")} to start Twitter OAuth.`);
-    await open(REDIRECT_URI.replace("/oauth2callback", ""));
+  app.listen(OAUTH_PORT, async () => {
+    console.log(`\n========================================`);
+    console.log(`🔐 OAuth Server running on port ${OAUTH_PORT}`);
+    console.log(`========================================`);
+    console.log(`Twitter/X OAuth: http://localhost:${OAUTH_PORT}/twitter`);
+    console.log(`Or from browser: http://YOUR_VM_IP:${OAUTH_PORT}/twitter`);
+    console.log(`========================================\n`);
+    // Don't auto-open on server (no browser available)
+    // await open(`http://localhost:${OAUTH_PORT}`);
   });
 }
 

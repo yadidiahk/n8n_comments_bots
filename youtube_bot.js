@@ -16,7 +16,8 @@ const __dirname = path.dirname(__filename);
 const TOKEN_PATH = path.join(__dirname, "youtube_tokens.json");
 
 const SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"];
-const redirectUri = "http://localhost:3000/oauth2callback";
+const OAUTH_PORT = 4000; // Unified OAuth port for all services
+const redirectUri = `http://localhost:${OAUTH_PORT}/youtube/callback`;
 const oauth2Client = new google.auth.OAuth2(
   process.env.YOUTUBE_CLIENT_ID,
   process.env.YOUTUBE_CLIENT_SECRET,
@@ -164,29 +165,44 @@ export function startAuthServer() {
   const app = express();
 
   app.get("/", (req, res) => {
+    res.send(`
+      <h1>OAuth Authentication Server</h1>
+      <h2>YouTube OAuth</h2>
+      <p><a href="${authUrl}">Authorize with YouTube</a></p>
+      <p>Or access: <a href="/youtube">/youtube</a></p>
+    `);
+  });
+
+  app.get("/youtube", (req, res) => {
     res.send(`<a href="${authUrl}">Authorize with YouTube</a>`);
   });
 
-  app.get("/oauth2callback", async (req, res) => {
+  app.get("/youtube/callback", async (req, res) => {
     try {
       const code = req.query.code;
       const { tokens } = await oauth2Client.getToken(code);
       oauth2Client.setCredentials(tokens);
       saveTokens(tokens);
 
-      console.log("Access Token:", tokens.access_token);
-      console.log("Refresh Token:", tokens.refresh_token);
+      console.log("✅ YouTube Access Token:", tokens.access_token);
+      console.log("✅ YouTube Refresh Token:", tokens.refresh_token);
 
-      res.send("Authorization complete! Tokens saved. You can close this tab.");
+      res.send("✅ YouTube Authorization complete! Tokens saved to youtube_tokens.json. You can close this tab.");
     } catch (err) {
       console.error(err);
-      res.send("Error during authorization.");
+      res.send("❌ Error during YouTube authorization: " + err.message);
     }
   });
 
-  app.listen(3000, async () => {
-    console.log("Open http://localhost:3000 to start YouTube OAuth flow");
-    await open("http://localhost:3000");
+  app.listen(OAUTH_PORT, async () => {
+    console.log(`\n========================================`);
+    console.log(`🔐 OAuth Server running on port ${OAUTH_PORT}`);
+    console.log(`========================================`);
+    console.log(`YouTube OAuth: http://localhost:${OAUTH_PORT}/youtube`);
+    console.log(`Or from browser: http://YOUR_VM_IP:${OAUTH_PORT}/youtube`);
+    console.log(`========================================\n`);
+    // Don't auto-open on server (no browser available)
+    // await open(`http://localhost:${OAUTH_PORT}/youtube`);
   });
 }
 

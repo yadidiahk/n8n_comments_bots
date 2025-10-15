@@ -26,14 +26,36 @@ function extractPostId(url) {
 
 // Function to refresh Reddit access token
 async function refreshAccessToken() {
-  const clientId = process.env.REDDIT_CLIENT_ID || "ox_IpudOacNTrC68D7yZkw";
-  const clientSecret = process.env.REDDIT_CLIENT_SECRET || "ouetFZNFOeiMNqmT0NNQnqmR3IAgXA";
-  const username = process.env.REDDIT_USERNAME || "Commercial_Term_8918";
-  const password = process.env.REDDIT_PASSWORD || "Yadidiah@Humai.30";
+  const clientId = process.env.REDDIT_CLIENT_ID;
+  const clientSecret = process.env.REDDIT_CLIENT_SECRET;
+  const username = process.env.REDDIT_USERNAME;
+  const password = process.env.REDDIT_PASSWORD;
+
+  // Debug: Check if credentials are present
+  console.log('=== Reddit Token Refresh Debug ===');
+  console.log('Client ID present:', !!clientId, clientId ? `(${clientId.substring(0, 6)}...)` : 'MISSING');
+  console.log('Client Secret present:', !!clientSecret, clientSecret ? `(${clientSecret.substring(0, 6)}...)` : 'MISSING');
+  console.log('Username present:', !!username, username ? `(${username})` : 'MISSING');
+  console.log('Password present:', !!password, password ? '(*****)' : 'MISSING');
+
+  if (!clientId || !clientSecret || !username || !password) {
+    throw new Error('Missing required Reddit credentials. Check your .env file for REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, and REDDIT_PASSWORD');
+  }
 
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
   try {
+    const requestBody = new URLSearchParams({
+      grant_type: "password",
+      username,
+      password,
+    });
+
+    console.log('Request URL: https://www.reddit.com/api/v1/access_token');
+    console.log('Request Method: POST');
+    console.log('Grant Type: password');
+    console.log('Request Body Keys:', Array.from(requestBody.keys()));
+
     const response = await fetch("https://www.reddit.com/api/v1/access_token", {
       method: "POST",
       headers: {
@@ -41,25 +63,43 @@ async function refreshAccessToken() {
         Authorization: `Basic ${auth}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: new URLSearchParams({
-        grant_type: "password",
-        username,
-        password,
-      }),
+      body: requestBody,
     });
 
-    const data = await response.json();
+    console.log('Response Status:', response.status, response.statusText);
+    console.log('Response Headers:', Object.fromEntries(response.headers.entries()));
+
+    const responseText = await response.text();
+    console.log('Response Body (raw):', responseText);
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse response as JSON:', parseError.message);
+      throw new Error(`Invalid JSON response from Reddit API: ${responseText.substring(0, 200)}`);
+    }
+
+    console.log('Response Data (parsed):', JSON.stringify(data, null, 2));
     
     if (data.access_token) {
       // Update the environment variable for the current session
       process.env.REDDIT_ACCESS_TOKEN = data.access_token;
       console.log('Reddit access token refreshed successfully');
+      console.log('Token expires in:', data.expires_in, 'seconds');
+      console.log('=== End Debug ===');
       return data.access_token;
     } else {
+      console.log('=== Error Response Details ===');
+      console.log('Error:', data.error);
+      console.log('Error Description:', data.error_description || 'Not provided');
+      console.log('Message:', data.message || 'Not provided');
+      console.log('=== End Debug ===');
       throw new Error(`Failed to get access token: ${JSON.stringify(data)}`);
     }
   } catch (error) {
     console.error("Error refreshing token:", error.message);
+    console.log('=== End Debug (with error) ===');
     throw error;
   }
 }
@@ -68,11 +108,23 @@ async function refreshAccessToken() {
 async function postComment({ thingId, text, isRetry = false }) {
   const url = "https://oauth.reddit.com/api/comment";
 
+  console.log('=== Reddit Comment Post Debug ===');
+  console.log('Attempt:', isRetry ? 'RETRY' : 'INITIAL');
+  console.log('Thing ID:', thingId);
+  console.log('Comment length:', text.length, 'characters');
+  console.log('Access Token present:', !!process.env.REDDIT_ACCESS_TOKEN);
+  if (process.env.REDDIT_ACCESS_TOKEN) {
+    console.log('Access Token preview:', process.env.REDDIT_ACCESS_TOKEN.substring(0, 20) + '...');
+  }
+
   const formData = new URLSearchParams({
     api_type: "json",
     thing_id: thingId,
     text: text,
   });
+
+  console.log('Posting to:', url);
+  console.log('Form data keys:', Array.from(formData.keys()));
 
   const response = await fetch(url, {
     method: "POST",
@@ -84,33 +136,59 @@ async function postComment({ thingId, text, isRetry = false }) {
     body: formData.toString(),
   });
 
+  console.log('Post Response Status:', response.status, response.statusText);
+  console.log('Post Response Headers:', Object.fromEntries(response.headers.entries()));
+
   // Check if response is HTML (indicates auth error)
   const contentType = response.headers.get("content-type");
+  console.log('Content-Type:', contentType);
+  
   if (contentType && contentType.includes("text/html")) {
     // Token likely expired, try to refresh and retry once
     if (!isRetry) {
-      console.log('Token appears to be expired or invalid. Attempting to refresh...');
+      console.log('Received HTML response - Token appears to be expired or invalid. Attempting to refresh...');
       await refreshAccessToken();
+      console.log('Token refreshed, retrying comment post...');
       return postComment({ thingId, text, isRetry: true });
     } else {
+      console.log('=== End Debug (auth failed after retry) ===');
       throw new Error('Authentication failed after token refresh. Please check your Reddit credentials.');
     }
   }
 
-  const result = await response.json();
+  const resultText = await response.text();
+  console.log('Response body (raw):', resultText);
+
+  let result;
+  try {
+    result = JSON.parse(resultText);
+    console.log('Response body (parsed):', JSON.stringify(result, null, 2));
+  } catch (parseError) {
+    console.error('Failed to parse response as JSON:', parseError.message);
+    console.log('=== End Debug (parse error) ===');
+    throw new Error(`Invalid JSON response: ${resultText.substring(0, 200)}`);
+  }
+
+  console.log('=== End Debug ===');
   return result;
 }
 
 // Main export function for server.js
 export async function postRedditComment(postUrl, comment) {
   try {
+    console.log('\n========================================');
+    console.log('REDDIT COMMENT POST REQUEST');
+    console.log('========================================');
     console.log('Processing Reddit comment request...');
     console.log('Post URL:', postUrl);
+    console.log('Comment preview:', comment.substring(0, 50) + (comment.length > 50 ? '...' : ''));
 
     // Check if access token is configured
     if (!process.env.REDDIT_ACCESS_TOKEN) {
       throw new Error('REDDIT_ACCESS_TOKEN not found in environment variables. Please configure Reddit OAuth first.');
     }
+
+    console.log('Access token is present in environment');
 
     // Extract post ID from URL
     const postId = extractPostId(postUrl);
@@ -122,7 +200,8 @@ export async function postRedditComment(postUrl, comment) {
       text: comment,
     });
 
-    console.log('Reddit API Response:', result);
+    console.log('\n--- Final Reddit API Response ---');
+    console.log(JSON.stringify(result, null, 2));
 
     // Check for errors in Reddit API response
     if (result.json?.errors && result.json.errors.length > 0) {
@@ -138,6 +217,9 @@ export async function postRedditComment(postUrl, comment) {
 
     // Check if comment was successfully posted
     if (result.json?.data?.things && result.json.data.things.length > 0) {
+      console.log('\n✓ SUCCESS: Comment posted successfully!');
+      console.log('Comment ID:', result.json.data.things[0].data.id);
+      console.log('========================================\n');
       return {
         success: true,
         message: 'Comment posted successfully!',
@@ -149,6 +231,8 @@ export async function postRedditComment(postUrl, comment) {
     }
 
     // Unexpected response format
+    console.log('\n✗ FAILED: Unexpected response format from Reddit API');
+    console.log('========================================\n');
     return {
       success: false,
       error: 'Unexpected response format from Reddit API',
@@ -158,12 +242,15 @@ export async function postRedditComment(postUrl, comment) {
     };
 
   } catch (error) {
-    console.error('Error posting Reddit comment:', error);
+    console.error('\n✗ ERROR posting Reddit comment:', error);
+    console.error('Error stack:', error.stack);
+    console.log('========================================\n');
     return {
       success: false,
       error: error.message,
       postUrl: postUrl,
-      comment: comment
+      comment: comment,
+      stack: error.stack
     };
   }
 }
@@ -182,3 +269,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
   })();
 }
+

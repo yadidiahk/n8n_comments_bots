@@ -4,6 +4,7 @@ import { postLinkedInComment } from './bot.js';
 import { postYouTubeComment } from './youtube_bot.js';
 import { postRedditComment } from './reddit_bot.js';
 import { postTwitterComment } from './twitter_bot.js';
+import { postTikTokComment } from './tiktok_bot.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 dotenv.config();
@@ -65,6 +66,18 @@ app.get('/', (req, res) => {
         supportedUrlFormats: [
           'https://twitter.com/username/status/TWEET_ID',
           'https://x.com/username/status/TWEET_ID'
+        ]
+      },
+      tiktok: {
+        path: '/api/tiktok/comment',
+        method: 'POST',
+        body: {
+          videoUrl: 'TikTok video URL',
+          comment: 'Comment text to post'
+        },
+        supportedUrlFormats: [
+          'https://www.tiktok.com/@username/video/VIDEO_ID',
+          'https://vm.tiktok.com/SHORT_CODE'
         ]
       },
       health: {
@@ -200,6 +213,38 @@ app.post('/api/twitter/comment', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('Twitter API Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/tiktok/comment', async (req, res) => {
+  try {
+    const { videoUrl, comment } = req.body;
+
+    if (!videoUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'videoUrl is required'
+      });
+    }
+
+    if (!comment) {
+      return res.status(400).json({
+        success: false,
+        error: 'comment is required'
+      });
+    }
+
+    console.log(`Received request to post TikTok comment on: ${videoUrl}`);
+    
+    const result = await postTikTokComment(videoUrl, comment);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('TikTok API Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message

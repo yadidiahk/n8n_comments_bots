@@ -8,11 +8,17 @@ services:
     container_name: leadgen-comment-bot
     ports:
       - "3000:3000"
+      - "6080:6080"  # noVNC web interface for remote desktop access
     environment:
       - LINKEDIN_USER=${LINKEDIN_USER}
       - LINKEDIN_PASS=${LINKEDIN_PASS}
-      - YOUTUBE_USER=${YOUTUBE_USER}
-      - YOUTUBE_PASS=${YOUTUBE_PASS}
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET}
+      - REDDIT_ACCESS_TOKEN=${REDDIT_ACCESS_TOKEN}
+      - X_CLIENT_ID=${X_CLIENT_ID}
+      - X_CLIENT_SECRET=${X_CLIENT_SECRET}
+      - TIKTOK_USER=${TIKTOK_USER}
+      - TIKTOK_PASS=${TIKTOK_PASS}
       - PORT=${PORT:-3000}
       - NODE_ENV=production
     volumes:
@@ -20,6 +26,7 @@ services:
       - linkedin_profile:/app/linkedin_profile
       - youtube_profile:/app/youtube_profile
       - tiktok_profile:/app/tiktok_profile
+      - reddit_profile:/app/reddit_profile
     restart: unless-stopped
     # Security options for running Chrome in Docker
     cap_add:
@@ -40,6 +47,8 @@ volumes:
   youtube_profile:
     driver: local
   tiktok_profile:
+    driver: local
+  reddit_profile:
     driver: local
 
 

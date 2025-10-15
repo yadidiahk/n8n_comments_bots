@@ -614,6 +614,24 @@ export async function postLinkedInComment(postUrl, commentText) {
     console.log("Comment posted successfully!");
     await delay(1500);
     
+    // Cleanup: close all other tabs or popups
+    try {
+      const pages = await browser.pages();
+      if (pages.length > 1) {
+        console.log(`Closing ${pages.length - 1} extra tabs...`);
+        for (let i = 1; i < pages.length; i++) {
+          try {
+            await pages[i].close();
+          } catch (e) {
+            console.log(`Error closing tab ${i}:`, e.message);
+          }
+        }
+      }
+      console.log("All extra tabs closed.");
+    } catch (cleanupError) {
+      console.log("Cleanup error:", cleanupError.message);
+    }
+    
     return {
       success: true,
       message: "Comment posted successfully!",

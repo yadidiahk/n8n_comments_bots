@@ -1,699 +1,286 @@
-import puppeteer from "puppeteer";
+// x_comment_bot.js
+import express from "express";
+import open from "open";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import crypto from "crypto";
+import fetch from "node-fetch";
 import dotenv from "dotenv";
+
 dotenv.config();
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-export async function postTwitterComment(tweetUrl, commentText) {
-  const username = process.env.TWITTER_USER;
-  const password = process.env.TWITTER_PASS;
+// --- Config ---
+const TOKENS_PATH = path.join(__dirname, "x_tokens.json");
+const PKCE_PATH = path.join(__dirname, "x_pkce.json");
 
-  if (!username || !password) {
-    throw new Error("Twitter credentials not found in environment variables");
+const CLIENT_ID = process.env.X_CLIENT_ID;          // from developer portal
+const CLIENT_SECRET = process.env.X_CLIENT_SECRET;  // optional, for confidential clients
+const REDIRECT_URI = "http://localhost:3000/oauth2callback";
+
+// Scopes needed to post + keep refresh token
+const SCOPES = ["tweet.read", "tweet.write", "users.read", "offline.access"];
+
+const AUTH_URL  = "https://twitter.com/i/oauth2/authorize";
+const TOKEN_URL = "https://api.twitter.com/2/oauth2/token";
+const TWEET_URL = "https://api.twitter.com/2/tweets";
+
+// --- Helpers: file I/O ---
+const readJSON = (p) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : null);
+const writeJSON = (p, obj) => fs.writeFileSync(p, JSON.stringify(obj, null, 2));
+
+// --- Helpers: base64url ---
+function base64url(buf) {
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// --- PKCE generation ---
+function createPkce() {
+  const codeVerifier = base64url(crypto.randomBytes(64)); // 86 chars
+  const codeChallenge = base64url(crypto.createHash("sha256").update(codeVerifier).digest());
+  const state = "xbot-" + base64url(crypto.randomBytes(24));
+  const pkce = { codeVerifier, codeChallenge, state, created_at: Date.now() };
+  writeJSON(PKCE_PATH, pkce);
+  return pkce;
+}
+
+// --- OAuth URLs ---
+function buildAuthUrl({ codeChallenge, state }) {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope: SCOPES.join(" "),
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+  });
+  return `${AUTH_URL}?${params.toString()}`;
+}
+
+// --- Token Exchange & Refresh ---
+async function exchangeCodeForTokens(code) {
+  const pkce = readJSON(PKCE_PATH);
+  if (!pkce) throw new Error("Missing PKCE file; start the auth server again.");
+
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: REDIRECT_URI,
+    client_id: CLIENT_ID,
+    code_verifier: pkce.codeVerifier,
+  });
+
+  const headers = { "Content-Type": "application/x-www-form-urlencoded" };
+  
+  // Add Basic auth if client secret is available (for confidential clients)
+  if (CLIENT_SECRET) {
+    const credentials = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
+    headers.Authorization = `Basic ${credentials}`;
   }
 
-  if (!tweetUrl || !commentText) {
-    throw new Error("Both tweetUrl and commentText are required");
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers,
+    body,
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`Token exchange failed: ${res.status} ${JSON.stringify(data)}`);
   }
 
-  let browser;
-  let page;
+  // Compute expires_at if expires_in provided
+  if (data.expires_in) data.expires_at = Math.floor(Date.now() / 1000) + data.expires_in;
+  writeJSON(TOKENS_PATH, data);
+  return data;
+}
 
+async function refreshAccessToken(refreshToken) {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: CLIENT_ID,
+  });
+
+  const headers = { "Content-Type": "application/x-www-form-urlencoded" };
+  
+  // Add Basic auth if client secret is available (for confidential clients)
+  if (CLIENT_SECRET) {
+    const credentials = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
+    headers.Authorization = `Basic ${credentials}`;
+  }
+
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers,
+    body,
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`Refresh failed: ${res.status} ${JSON.stringify(data)}`);
+  }
+
+  if (data.expires_in) data.expires_at = Math.floor(Date.now() / 1000) + data.expires_in;
+  writeJSON(TOKENS_PATH, data);
+  return data;
+}
+
+// --- Get valid access token (auto-refresh) ---
+async function getAccessToken() {
+  let tokens = readJSON(TOKENS_PATH);
+  if (!tokens) throw new Error("No tokens saved. Run: node x_comment_bot.js auth");
+
+  const now = Math.floor(Date.now() / 1000);
+  const needsRefresh = !tokens.expires_at || (now > tokens.expires_at - 60);
+
+  if (needsRefresh) {
+    if (!tokens.refresh_token) {
+      throw new Error("No refresh_token available. Re-run auth with 'offline.access' scope.");
+    }
+    tokens = await refreshAccessToken(tokens.refresh_token);
+  }
+  return tokens.access_token;
+}
+
+// --- Extract tweet ID from URL ---
+function extractTweetId(tweetUrl) {
+  // Support formats:
+  // https://twitter.com/username/status/TWEET_ID
+  // https://x.com/username/status/TWEET_ID
+  const match = tweetUrl.match(/status\/(\d+)/);
+  if (!match) {
+    throw new Error("Invalid tweet URL. Expected format: https://twitter.com/username/status/TWEET_ID");
+  }
+  return match[1];
+}
+
+// --- Post a reply (comment) ---
+export async function postTweetComment(tweetId, text) {
+  const accessToken = await getAccessToken();
+
+  const res = await fetch(TWEET_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      text,
+      reply: { in_reply_to_tweet_id: tweetId },
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`Tweet failed: ${res.status} ${JSON.stringify(data)}`);
+  }
+  return data;
+}
+
+// --- Wrapper for server.js API (takes URL instead of ID) ---
+export async function postTwitterComment(tweetUrl, comment) {
   try {
-    console.log("Launching browser in headful mode...");
+    console.log('Processing Twitter comment request...');
+    console.log('Tweet URL:', tweetUrl);
+
+    // Extract tweet ID from URL
+    const tweetId = extractTweetId(tweetUrl);
+    console.log('Extracted Tweet ID:', tweetId);
+
+    // Post the reply
+    const result = await postTweetComment(tweetId, comment);
     
-    const launchOptions = {
-      headless: false,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--window-size=1280,800",
-        "--start-maximized"
-      ],
-      defaultViewport: null
-    };
-
-    // Only set executablePath if explicitly provided or on Linux
-    if (process.env.CHROME_BIN) {
-      launchOptions.executablePath = process.env.CHROME_BIN;
-    } else if (process.platform === 'linux') {
-      launchOptions.executablePath = '/usr/bin/chromium';
-    }
-    // On macOS and Windows, let Puppeteer find Chrome automatically
-
-    browser = await puppeteer.launch(launchOptions);
-
-    page = await browser.newPage();
-
-    await page.setViewport({ width: 1280, height: 800 });
-
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-      });
-    });
-
-    console.log("=== STEP 1: Navigating directly to tweet ===");
-    console.log(`Tweet URL: ${tweetUrl}`);
-    
-    try {
-      await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
-    } catch (navError) {
-      console.log("Navigation to tweet timed out, but continuing...");
-    }
-
-    console.log("Waiting for page to load...");
-    await delay(5000);
-    
-    let currentUrl = page.url();
-    console.log(`Current URL: ${currentUrl}`);
-
-    // Check for login modal FIRST before doing anything else
-    console.log("\n=== STEP 2: Checking for login modal ===");
-    const loginModalAppeared = await page.evaluate(() => {
-      const modalText = document.body.textContent || '';
-      return modalText.includes('Reply to join the conversation') || 
-             modalText.includes('Log in to X') ||
-             (modalText.includes('Log in') && modalText.includes('Sign up'));
-    });
-    
-    console.log(`Login modal present: ${loginModalAppeared}`);
-    
-    if (loginModalAppeared) {
-      console.log("Login modal detected! Need to log in first...");
-      await page.screenshot({ path: 'twitter-login-modal-detected.png', fullPage: true });
-      
-      // Click the "Log in" button in the modal
-      const loginButtonClicked = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, a, div[role="button"], a[role="link"]'));
-        for (const button of buttons) {
-          const text = button.textContent?.trim();
-          if (text === 'Log in' || text === 'Login') {
-            button.click();
-            return true;
-          }
-        }
-        return false;
-      });
-      
-      if (loginButtonClicked) {
-        console.log("Clicked 'Log in' button in modal");
-        await delay(3000);
-        
-        // Now we should be on the login page
-        currentUrl = page.url();
-        console.log(`Current URL after clicking login: ${currentUrl}`);
-        
-        if (currentUrl.includes("/login") || currentUrl.includes("/i/flow")) {
-          console.log("Successfully redirected to login page. Performing login...");
-          
-          // Perform login
-          console.log("Looking for username field...");
-          const possibleUsernameSelectors = [
-            'input[autocomplete="username"]',
-            'input[name="text"]',
-            'input[type="text"]'
-          ];
-
-          let usernameSelector = null;
-          for (const selector of possibleUsernameSelectors) {
-            try {
-              await page.waitForSelector(selector, { timeout: 5000, visible: true });
-              usernameSelector = selector;
-              console.log(`Found username field: ${selector}`);
-              break;
-            } catch (e) {
-              continue;
-            }
-          }
-
-          if (!usernameSelector) {
-            await page.screenshot({ path: 'twitter-login-page-error.png', fullPage: true });
-            throw new Error("Username field not found on login page");
-          }
-
-          console.log("Entering username...");
-          await page.type(usernameSelector, username, { delay: 100 });
-          await delay(500);
-          await page.keyboard.press('Enter');
-          await delay(2000);
-
-          // Check for verification
-          const needsVerification = await page.evaluate(() => {
-            const text = document.body.textContent || '';
-            return text.includes('Enter your phone') || text.includes('Enter your email');
-          });
-
-          if (needsVerification) {
-            console.log("Additional verification required. Entering username/email...");
-            const verificationField = await page.$('input[type="text"]');
-            if (verificationField) {
-              await page.type('input[type="text"]', username, { delay: 100 });
-              await delay(500);
-              await page.keyboard.press('Enter');
-              await delay(2000);
-            }
-          }
-
-          console.log("Looking for password field...");
-          const possiblePasswordSelectors = [
-            'input[name="password"]',
-            'input[type="password"]'
-          ];
-
-          let passwordSelector = null;
-          for (const selector of possiblePasswordSelectors) {
-            try {
-              await page.waitForSelector(selector, { timeout: 5000, visible: true });
-              passwordSelector = selector;
-              console.log(`Found password field: ${selector}`);
-              break;
-            } catch (e) {
-              continue;
-            }
-          }
-
-          if (!passwordSelector) {
-            await page.screenshot({ path: 'twitter-password-field-error.png', fullPage: true });
-            throw new Error("Password field not found");
-          }
-
-          console.log("Entering password...");
-          await page.type(passwordSelector, password, { delay: 100 });
-          await delay(1000);
-          
-          console.log("Clicking login button...");
-          await page.keyboard.press('Enter');
-          await delay(5000);
-
-          currentUrl = page.url();
-          console.log(`Current URL after login: ${currentUrl}`);
-
-          if (currentUrl.includes("/login") || currentUrl.includes("/i/flow")) {
-            await page.screenshot({ path: 'twitter-login-failed.png', fullPage: true });
-            throw new Error("Login failed. Check credentials.");
-          }
-
-          console.log("Login successful! Navigating back to tweet...");
-          await page.goto(tweetUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
-          await delay(5000);
-        }
-      } else {
-        throw new Error("Could not find 'Log in' button in modal");
-      }
-    } else {
-      console.log("No login modal detected - already logged in or page loaded correctly");
-    }
-
-    // Wait for tweet to load
-    console.log("Waiting for tweet to fully load...");
-    try {
-      await page.waitForSelector('[data-testid="tweet"], article', {
-        timeout: 10000,
-        visible: true
-      });
-      console.log("Tweet loaded!");
-    } catch (e) {
-      console.log("Could not detect tweet, but continuing...");
-    }
-    await delay(1000);
-
-    // Scroll the tweet into view properly
-    console.log("Scrolling tweet into view...");
-    await page.evaluate(() => {
-      const tweet = document.querySelector('[data-testid="tweet"]');
-      if (tweet) {
-        tweet.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      } else {
-        window.scrollBy(0, 300);
-      }
-    });
-    await delay(2000);
-
-    console.log("\n=== STEP 3: Finding and clicking reply button ===");
-    
-    // First, let's check what buttons are available
-    const availableButtons = await page.evaluate(() => {
-      const buttons = document.querySelectorAll('[data-testid]');
-      return Array.from(buttons).map(btn => ({
-        testId: btn.getAttribute('data-testid'),
-        visible: btn.offsetParent !== null,
-        ariaLabel: btn.getAttribute('aria-label')
-      })).filter(b => b.testId && b.testId.includes('reply'));
-    });
-    console.log("Available reply-related buttons:", JSON.stringify(availableButtons, null, 2));
-
-    const replyButtonSelectors = [
-      '[data-testid="reply"]',
-      'button[data-testid="reply"]',
-      'div[data-testid="reply"]',
-      '[aria-label*="Reply"]',
-      '[aria-label*="reply"]',
-      'div[role="button"][aria-label*="Reply"]'
-    ];
-
-    let replyButtonActivated = false;
-    
-    // Try each selector
-    for (const selector of replyButtonSelectors) {
-      try {
-        const elements = await page.$$(selector);
-        console.log(`Found ${elements.length} element(s) with selector: ${selector}`);
-        
-        if (elements.length > 0) {
-          for (const element of elements) {
-            const isVisible = await element.isVisible().catch(() => false);
-            const boundingBox = await element.boundingBox().catch(() => null);
-            
-            console.log(`  Element visible: ${isVisible}, boundingBox:`, boundingBox);
-            
-            if (isVisible && boundingBox) {
-              console.log(`Clicking reply button: ${selector}`);
-              
-              // Scroll into view first
-              await element.evaluate(el => {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-              await delay(1000);
-              
-              await element.click();
-              await delay(3000);
-              replyButtonActivated = true;
-
-              // Check if reply box appeared
-              const hasReplyBox = await page.evaluate(() => {
-                const editables = document.querySelectorAll('[data-testid="tweetTextarea_0"], div[contenteditable="true"][role="textbox"]');
-                return editables.length > 0;
-              });
-
-              if (hasReplyBox) {
-                console.log("Reply box activated successfully!");
-                break;
-              } else {
-                console.log("Reply box did not appear after click, trying next selector...");
-                replyButtonActivated = false;
-              }
-            }
-          }
-          if (replyButtonActivated) break;
-        }
-      } catch (e) {
-        console.log(`Error with selector ${selector}: ${e.message}`);
-        continue;
-      }
-    }
-
-    if (!replyButtonActivated) {
-      console.log("Reply button not found with selectors, trying JavaScript click...");
-      
-      // Try finding and clicking via JavaScript
-      const jsClicked = await page.evaluate(() => {
-        const replyButtons = document.querySelectorAll('[data-testid="reply"]');
-        if (replyButtons.length > 0) {
-          replyButtons[0].click();
-          return true;
-        }
-        return false;
-      });
-      
-      if (jsClicked) {
-        console.log("Clicked reply button via JavaScript");
-        await delay(3000);
-        replyButtonActivated = true;
-      }
-    }
-    
-    if (!replyButtonActivated) {
-      console.log("WARNING: Could not activate reply button. Taking screenshot...");
-      await page.screenshot({ path: 'twitter-reply-button-not-found.png', fullPage: true });
-    } else {
-      await delay(2000);
-    }
-
-    console.log("\n=== STEP 4: Finding tweet compose box ===");
-    const possibleSelectors = [
-      '[data-testid="tweetTextarea_0"]',
-      'div[contenteditable="true"][role="textbox"]',
-      '[data-testid="tweetTextarea_0"] div[contenteditable="true"]',
-      'div[contenteditable="true"][data-text="true"]',
-      '[contenteditable="true"]',
-      'div[role="textbox"][contenteditable="true"]'
-    ];
-
-    let commentBoxSelector = null;
-    let commentBoxElement = null;
-
-    // Try multiple times with delays
-    for (let attempt = 0; attempt < 4; attempt++) {
-      if (commentBoxSelector) break;
-
-      console.log(`Attempt ${attempt + 1} to find comment box...`);
-
-      for (const selector of possibleSelectors) {
-        try {
-          const elements = await page.$$(selector);
-          if (elements.length > 0) {
-            console.log(`Found ${elements.length} element(s) matching: ${selector}`);
-
-            for (const el of elements) {
-              try {
-                const isVisible = await el.isVisible();
-                const boundingBox = await el.boundingBox();
-
-                // Check if element is in reply/compose section
-                const isInReplySection = await el.evaluate(node => {
-                  let parent = node.parentElement;
-                  let maxDepth = 15;
-                  while (parent && maxDepth > 0) {
-                    const testId = parent.getAttribute('data-testid') || '';
-                    const ariaLabel = parent.getAttribute('aria-label') || '';
-                    if (testId.includes('tweet') || testId.includes('reply') ||
-                        ariaLabel.toLowerCase().includes('tweet') ||
-                        ariaLabel.toLowerCase().includes('reply')) {
-                      return true;
-                    }
-                    parent = parent.parentElement;
-                    maxDepth--;
-                  }
-                  return false;
-                });
-
-                if (isVisible && boundingBox && (isInReplySection || elements.length === 1)) {
-                  commentBoxSelector = selector;
-                  commentBoxElement = el;
-                  console.log(`Found valid comment box with selector: ${selector}`);
-                  break;
-                }
-              } catch (e) {
-                continue;
-              }
-            }
-            if (commentBoxSelector) break;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-
-      if (!commentBoxSelector && attempt < 3) {
-        console.log("Comment box not found yet, trying to activate it...");
-
-        // Try clicking on reply button with JavaScript
-        const clicked = await page.evaluate(() => {
-          const replyButtons = document.querySelectorAll('[data-testid="reply"], [aria-label*="Reply"]');
-          if (replyButtons.length > 0) {
-            replyButtons[0].click();
-            return true;
-          }
-          return false;
-        });
-
-        if (clicked) {
-          console.log("Clicked on reply button, waiting for compose box...");
-        }
-
-        await delay(2000);
-        await page.evaluate(() => window.scrollBy(0, 100));
-        await delay(1000);
-      }
-    }
-
-    if (!commentBoxSelector) {
-      console.log("Could not find comment box. Debugging information:");
-      console.log("Current URL:", page.url());
-
-      // Get all contenteditable elements
-      const availableElements = await page.evaluate(() => {
-        const editables = document.querySelectorAll('[contenteditable="true"], div[role="textbox"], [data-testid*="tweet"]');
-        return Array.from(editables).map((el, i) => ({
-          index: i,
-          tagName: el.tagName,
-          className: el.className,
-          testId: el.getAttribute('data-testid'),
-          role: el.getAttribute('role'),
-          visible: el.offsetParent !== null,
-          boundingBox: el.getBoundingClientRect ? {
-            width: el.getBoundingClientRect().width,
-            height: el.getBoundingClientRect().height,
-            top: el.getBoundingClientRect().top
-          } : null
-        }));
-      });
-      console.log("Available editable elements:", JSON.stringify(availableElements, null, 2));
-
-      // Take screenshot
-      await page.screenshot({ path: 'twitter-comment-box-not-found.png', fullPage: true });
-      console.log("Screenshot saved as twitter-comment-box-not-found.png");
-
-      throw new Error("Comment box not found with any known selector. Check twitter-comment-box-not-found.png for debugging.");
-    }
-
-    console.log("Clicking on comment box...");
-    try {
-      await commentBoxElement.click();
-    } catch (e) {
-      await page.click(commentBoxSelector);
-    }
-    await delay(1000);
-
-    console.log(`Typing comment: "${commentText}"`);
-    await page.type(commentBoxSelector, commentText, { delay: 50 });
-
-    // Verify the text was actually entered
-    const typedText = await page.evaluate((selector) => {
-      const element = document.querySelector(selector);
-      return element ? element.innerText || element.textContent : '';
-    }, commentBoxSelector);
-    console.log(`Text in comment box: "${typedText}"`);
-
-    if (!typedText || !typedText.includes(commentText.trim())) {
-      throw new Error(`Comment text mismatch! Expected: "${commentText}", Got: "${typedText}"`);
-    }
-
-    console.log("Waiting for submit button to be enabled...");
-    await delay(1500);
-
-    console.log("Looking for submit button...");
-    const possibleButtonSelectors = [
-      '[data-testid="tweetButtonInline"]',
-      '[data-testid="tweetButton"]',
-      'button[data-testid="tweetButtonInline"]',
-      'div[data-testid="tweetButtonInline"]',
-      'button[role="button"]:has-text("Reply")',
-      'div[role="button"]:has-text("Reply")',
-      '[aria-label*="Reply"]'
-    ];
-
-    let submitButtonSelector = null;
-    let submitButtonElement = null;
-
-    for (const selector of possibleButtonSelectors) {
-      try {
-        const elements = await page.$$(selector);
-        if (elements.length > 0) {
-          for (const el of elements) {
-            const isVisible = await el.isVisible().catch(() => false);
-            const isEnabled = await el.evaluate(node => {
-              const ariaDisabled = node.getAttribute('aria-disabled');
-              return ariaDisabled !== 'true' && node.offsetParent !== null;
-            }).catch(() => false);
-
-            if (isVisible && isEnabled) {
-              submitButtonSelector = selector;
-              submitButtonElement = el;
-              console.log(`Found submit button with selector: ${selector}`);
-              break;
-            }
-          }
-          if (submitButtonSelector) break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
-    // If still not found, try a more general approach
-    if (!submitButtonSelector) {
-      console.log("Trying to find submit button by text content...");
-      submitButtonElement = await page.evaluateHandle(() => {
-        const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
-        for (const button of buttons) {
-          const text = button.textContent?.trim().toLowerCase() || '';
-          const testId = button.getAttribute('data-testid') || '';
-          if ((text === 'reply' || text === 'tweet' || testId.includes('tweet')) &&
-              button.offsetParent !== null &&
-              button.getAttribute('aria-disabled') !== 'true') {
-            return button;
-          }
-        }
-        return null;
-      });
-
-      if (submitButtonElement && await submitButtonElement.evaluate(el => el !== null)) {
-        console.log("Found submit button by text content");
-        submitButtonSelector = 'button';
-      }
-    }
-
-    if (!submitButtonSelector && !submitButtonElement) {
-      console.log("Could not find submit button. Available buttons on page:");
-      const availableButtons = await page.evaluate(() => {
-        const buttons = document.querySelectorAll('button, div[role="button"]');
-        return Array.from(buttons).map((el, i) => ({
-          index: i,
-          testId: el.getAttribute('data-testid'),
-          ariaLabel: el.getAttribute('aria-label'),
-          ariaDisabled: el.getAttribute('aria-disabled'),
-          text: el.textContent?.trim().substring(0, 50),
-          visible: el.offsetParent !== null
-        })).filter(b => b.visible && (b.text?.toLowerCase().includes('reply') || b.text?.toLowerCase().includes('tweet') || b.testId?.includes('tweet')));
-      });
-      console.log(JSON.stringify(availableButtons, null, 2));
-
-      await page.screenshot({ path: 'twitter-submit-button-not-found.png', fullPage: true });
-      throw new Error("Submit button not found or not enabled");
-    }
-
-    console.log("Scrolling button into view...");
-    if (submitButtonSelector && submitButtonSelector !== 'button') {
-      await page.evaluate((selector) => {
-        const button = document.querySelector(selector);
-        if (button) {
-          button.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, submitButtonSelector);
-    } else if (submitButtonElement) {
-      await submitButtonElement.evaluate(el => {
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
-    }
-
-    await delay(500);
-
-    // Check button state before clicking
-    const buttonState = submitButtonElement ? await submitButtonElement.evaluate(node => {
-      if (!node) return { found: false };
-      return {
-        found: true,
-        ariaDisabled: node.getAttribute('aria-disabled'),
-        visible: node.offsetParent !== null,
-        text: node.textContent?.trim(),
-        testId: node.getAttribute('data-testid')
-      };
-    }).catch(() => ({ found: false })) : { found: false };
-
-    console.log("Button state before click:", JSON.stringify(buttonState, null, 2));
-
-    if (buttonState.ariaDisabled === 'true') {
-      throw new Error("Submit button is still disabled! The comment might not be ready to post.");
-    }
-
-    console.log("Submitting comment...");
-    let clickSuccess = false;
-
-    try {
-      if (submitButtonElement) {
-        await submitButtonElement.click();
-        console.log("Element click executed");
-        clickSuccess = true;
-      }
-    } catch (clickError) {
-      console.log("Element click failed, trying page.click...");
-      try {
-        if (submitButtonSelector && submitButtonSelector !== 'button') {
-          await page.click(submitButtonSelector);
-          console.log("Page click executed");
-          clickSuccess = true;
-        } else {
-          throw new Error("No valid selector for page.click");
-        }
-      } catch (clickError2) {
-        console.log("Page click failed, trying JavaScript click...");
-        try {
-          await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
-            for (const button of buttons) {
-              const text = button.textContent?.trim().toLowerCase() || '';
-              const testId = button.getAttribute('data-testid') || '';
-              if ((text === 'reply' || text === 'tweet' || testId.includes('tweet')) &&
-                  button.offsetParent !== null &&
-                  button.getAttribute('aria-disabled') !== 'true') {
-                button.click();
-                return true;
-              }
-            }
-            return false;
-          });
-          console.log("JavaScript click executed");
-          clickSuccess = true;
-        } catch (jsClickError) {
-          console.error("All click methods failed:", jsClickError.message);
-          throw new Error("Failed to click submit button with any method");
-        }
-      }
-    }
-
-    console.log("Waiting for comment to be posted...");
-    await delay(3000);
-
-    // Verify the comment was posted by checking if the compose box is gone or cleared
-    const commentBoxAfterSubmit = await page.evaluate((selector) => {
-      const element = document.querySelector(selector);
-      return element ? element.innerText || element.textContent : null;
-    }, commentBoxSelector);
-
-    console.log(`Comment box after submit: "${commentBoxAfterSubmit}"`);
-
-    // Check if our comment appears in the replies
-    const commentAppeared = await page.evaluate((commentTextParam) => {
-      const tweets = Array.from(document.querySelectorAll('[data-testid="tweetText"]'));
-      return tweets.some(tweet => {
-        const text = tweet.innerText || tweet.textContent;
-        return text && text.includes(commentTextParam);
-      });
-    }, commentText);
-
-    if (commentAppeared) {
-      console.log("SUCCESS! Comment verified to appear in the replies!");
-    } else if (!commentBoxAfterSubmit || commentBoxAfterSubmit.trim() === '' || commentBoxAfterSubmit.trim().length < 5) {
-      console.log("Comment box is empty - comment likely posted successfully!");
-    } else {
-      console.log("WARNING: Comment box still contains text. Comment may not have been posted.");
-      console.log("Taking screenshot for debugging...");
-      await page.screenshot({ path: 'twitter-post-submit-screenshot.png', fullPage: true });
-      throw new Error("Comment submission may have failed - comment box not cleared");
-    }
-
-    console.log("Comment posted successfully!");
-    await delay(1500);
-
     return {
       success: true,
-      message: "Comment posted successfully!",
-      tweetUrl: tweetUrl,
-      comment: commentText
+      platform: 'twitter',
+      tweetUrl,
+      tweetId,
+      comment,
+      response: result
     };
-
   } catch (error) {
-    console.error("Error occurred:", error.message);
-    if (page) {
-      console.log("Current URL:", page.url());
-      console.log("Taking screenshot for debugging...");
-      try {
-        await page.screenshot({ path: 'twitter-error-screenshot.png', fullPage: true });
-        console.log("Screenshot saved as twitter-error-screenshot.png");
-      } catch (screenshotError) {
-        console.log("Could not take screenshot:", screenshotError.message);
-      }
-    }
-    throw error;
-  } finally {
-    if (browser) {
-      await browser.close();
-      console.log("Browser closed.");
-    }
+    console.error('Error posting Twitter comment:', error.message);
+    return {
+      success: false,
+      platform: 'twitter',
+      error: error.message
+    };
   }
 }
 
+// --- Auth server (one-time) ---
+export function startAuthServer() {
+  if (!CLIENT_ID) {
+    console.error("Missing X_CLIENT_ID in .env");
+    process.exit(1);
+  }
+  if (!REDIRECT_URI.startsWith("http://localhost")) {
+    console.warn("TIP: For local testing, use a localhost redirect URI registered in your app settings.");
+  }
+
+  const app = express();
+  const pkce = createPkce();
+  const authUrl = buildAuthUrl(pkce);
+
+  app.get("/", (_req, res) => {
+    res.send(`<a href="${authUrl}">Authorize Twitter Bot</a>`);
+  });
+
+  app.get("/oauth2callback", async (req, res) => {
+    try {
+      const { code, state } = req.query;
+      const saved = readJSON(PKCE_PATH);
+      if (!saved || saved.state !== state) throw new Error("Invalid or mismatched state.");
+
+      const tokens = await exchangeCodeForTokens(code);
+      console.log("Access token saved. Has refresh_token:", !!tokens.refresh_token);
+      res.send("Authorization complete! You can close this tab.");
+    } catch (e) {
+      console.error(e);
+      res.status(500).send(`OAuth error: ${e.message}`);
+    }
+  });
+
+  const port = Number(process.env.PORT) || 3000;
+  app.listen(port, async () => {
+    console.log(`Open ${REDIRECT_URI.replace("/oauth2callback", "")} to start Twitter OAuth.`);
+    await open(REDIRECT_URI.replace("/oauth2callback", ""));
+  });
+}
+
+// --- CLI ---
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const [cmd, arg1, ...rest] = process.argv.slice(2);
+  if (cmd === "auth") {
+    startAuthServer();
+  } else if (cmd === "post") {
+    const tweetId = arg1;
+    const text = rest.join(" ") || "Hello from an auto-refreshing X bot!";
+    if (!tweetId) {
+      console.log("Usage: node x_comment_bot.js post <tweetId> \"your reply text\"");
+      process.exit(1);
+    }
+    postTweetComment(tweetId, text)
+      .then((r) => console.log("Success:", JSON.stringify(r, null, 2)))
+      .catch((e) => console.error(e));
+  } else {
+    console.log(`
+Usage:
+  node x_comment_bot.js auth                          # authorize & save tokens
+  node x_comment_bot.js post <tweetId> "reply text"   # post a reply
+Env (.env):
+  X_CLIENT_ID=your_twitter_client_id
+  X_CLIENT_SECRET=your_twitter_client_secret         # required for confidential clients
+  X_REDIRECT_URI=http://localhost:3000/oauth2callback
+Notes:
+  • Register ${REDIRECT_URI} exactly in your Twitter app settings.
+  • App MUST have Read+Write and OAuth 2.0 user context enabled.
+  • Scopes include offline.access for refresh_token.
+`);
+  }
+}

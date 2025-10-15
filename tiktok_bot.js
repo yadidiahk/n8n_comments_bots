@@ -194,23 +194,64 @@ export async function postTikTokComment(videoUrl, commentText) {
       
       console.log("Entering credentials...");
       
-      // Click on username field first to focus it
-      await usernameInput.click();
+      // Clear and type username with more robust method
+      await usernameInput.click({ clickCount: 3 });
       await delay(300);
       
-      // Type username
-      await usernameInput.type(username, { delay: 100 });
+      // Clear any existing text (use Meta/Command on Mac, Control on others)
+      const modifierKey = process.platform === 'darwin' ? 'Meta' : 'Control';
+      await page.keyboard.down(modifierKey);
+      await page.keyboard.press('KeyA');
+      await page.keyboard.up(modifierKey);
+      await page.keyboard.press('Backspace');
+      await delay(200);
+      
+      // Type username character by character to ensure proper events
+      console.log(`Typing username: ${username}`);
+      await page.keyboard.type(username, { delay: 100 });
       console.log("Username entered");
       await delay(500);
       
+      // Verify username was entered
+      const usernameValue = await page.evaluate((selector) => {
+        const inputs = document.querySelectorAll(selector);
+        for (const input of inputs) {
+          if (input.offsetParent !== null) {
+            return input.value;
+          }
+        }
+        return '';
+      }, usernameSelector);
+      console.log(`Username in field: "${usernameValue}"`);
+      
       // Click on password field
-      await passwordInput.click();
+      await passwordInput.click({ clickCount: 3 });
       await delay(300);
       
-      // Type password
-      await passwordInput.type(password, { delay: 100 });
+      // Clear any existing text (use Meta/Command on Mac, Control on others)
+      await page.keyboard.down(modifierKey);
+      await page.keyboard.press('KeyA');
+      await page.keyboard.up(modifierKey);
+      await page.keyboard.press('Backspace');
+      await delay(200);
+      
+      // Type password character by character to ensure proper events
+      console.log(`Typing password (length: ${password.length})`);
+      await page.keyboard.type(password, { delay: 120 });
       console.log("Password entered");
       await delay(1000);
+      
+      // Verify password was entered (check length since we can't see the actual value)
+      const passwordValue = await page.evaluate((selector) => {
+        const inputs = document.querySelectorAll(selector);
+        for (const input of inputs) {
+          if (input.offsetParent !== null) {
+            return input.value;
+          }
+        }
+        return '';
+      }, passwordSelector);
+      console.log(`Password field length: ${passwordValue.length} (expected: ${password.length})`);
       
       console.log("Looking for submit button...");
       
@@ -279,16 +320,72 @@ export async function postTikTokComment(videoUrl, commentText) {
       console.log("Clicking submit button...");
       await submitButton.click();
       
-      console.log("Waiting for login to complete...");
-      await delay(5000);
+      console.log("Waiting for login response...");
+      await delay(3000);
+      
+      // Check for error messages immediately
+      const errorMessages = await page.evaluate(() => {
+        const errorElements = document.querySelectorAll('[class*="error" i], [class*="Error" i], [data-e2e*="error"], .tiktok-error, [role="alert"]');
+        const messages = [];
+        errorElements.forEach(el => {
+          if (el.offsetParent !== null && el.textContent.trim()) {
+            messages.push(el.textContent.trim());
+          }
+        });
+        
+        // Also check for any red text or warning indicators
+        const redText = document.querySelectorAll('[style*="color: rgb(254, 44, 85)"], [style*="color: red" i], [class*="invalid" i]');
+        redText.forEach(el => {
+          if (el.offsetParent !== null && el.textContent.trim() && !messages.includes(el.textContent.trim())) {
+            messages.push(el.textContent.trim());
+          }
+        });
+        
+        return messages;
+      });
+      
+      if (errorMessages.length > 0) {
+        console.log("⚠️  ERROR MESSAGES DETECTED ON PAGE:");
+        errorMessages.forEach((msg, i) => console.log(`  ${i + 1}. ${msg}`));
+        await page.screenshot({ path: 'tiktok-login-error-detected.png', fullPage: true });
+        throw new Error(`TikTok login error: ${errorMessages.join('; ')}`);
+      }
+      
+      console.log("No immediate errors detected. Waiting for navigation...");
+      await delay(2000);
       
       currentUrl = page.url();
       console.log(`Current URL after login: ${currentUrl}`);
       
+      // Take a screenshot to see what's on screen
+      await page.screenshot({ path: 'tiktok-after-login-click.png', fullPage: true });
+      console.log("Screenshot saved: tiktok-after-login-click.png");
+      
       // Check if verification is required
       if (currentUrl.includes("/login") || currentUrl.includes("/verify")) {
-        console.log("TikTok may be asking for verification. Please complete it manually.");
-        console.log("The browser will remain open for 60 seconds...");
+        console.log("Still on login/verify page. Checking what's displayed...");
+        
+        // Get more info about what's on the page
+        const pageContent = await page.evaluate(() => {
+          return {
+            title: document.title,
+            visibleText: document.body.innerText.substring(0, 500),
+            hasVerificationForm: !!document.querySelector('[data-e2e*="verify"], [data-e2e*="verification"]'),
+            hasCaptcha: !!document.querySelector('[class*="captcha" i], #captcha, iframe[src*="captcha"]'),
+            hasLoginForm: !!document.querySelector('input[type="password"]')
+          };
+        });
+        console.log("Page state:", JSON.stringify(pageContent, null, 2));
+        
+        if (pageContent.hasCaptcha) {
+          console.log("⚠️  CAPTCHA detected! Please solve it manually.");
+        }
+        
+        if (pageContent.hasVerificationForm) {
+          console.log("⚠️  Email/SMS verification required. Please complete it manually.");
+        }
+        
+        console.log("The browser will remain open for 60 seconds for you to complete any verification...");
         await delay(60000);
       }
       

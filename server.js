@@ -4,6 +4,7 @@ import { postLinkedInComment } from './bot.js';
 import { postYouTubeComment } from './youtube_bot.js';
 import { postRedditComment } from './reddit_bot.js';
 import { postTwitterComment } from './twitter_bot.js';
+import { postTwitterComment as postTwitterCommentPuppeteer } from './twitter_puppeteer_bot.js';
 import { postTikTokComment } from './tiktok_bot.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
@@ -66,7 +67,21 @@ app.get('/', (req, res) => {
         supportedUrlFormats: [
           'https://twitter.com/username/status/TWEET_ID',
           'https://x.com/username/status/TWEET_ID'
-        ]
+        ],
+        note: 'Uses Twitter API with OAuth (requires API tokens)'
+      },
+      twitter2: {
+        path: '/api/twitter2/comment',
+        method: 'POST',
+        body: {
+          tweetUrl: 'Twitter/X tweet URL',
+          comment: 'Reply text to post'
+        },
+        supportedUrlFormats: [
+          'https://twitter.com/username/status/TWEET_ID',
+          'https://x.com/username/status/TWEET_ID'
+        ],
+        note: 'Uses Puppeteer browser automation (requires TWITTER_USER/TWITTER_PASS)'
       },
       tiktok: {
         path: '/api/tiktok/comment',
@@ -213,6 +228,38 @@ app.post('/api/twitter/comment', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('Twitter API Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/api/twitter2/comment', async (req, res) => {
+  try {
+    const { tweetUrl, comment } = req.body;
+
+    if (!tweetUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'tweetUrl is required'
+      });
+    }
+
+    if (!comment) {
+      return res.status(400).json({
+        success: false,
+        error: 'comment is required'
+      });
+    }
+
+    console.log(`Received request to post Twitter reply (Puppeteer) on: ${tweetUrl}`);
+    
+    const result = await postTwitterCommentPuppeteer(tweetUrl, comment);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Twitter Puppeteer API Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message

@@ -24,8 +24,48 @@ function extractPostId(url) {
   throw new Error('Invalid Reddit URL format. Expected: https://www.reddit.com/r/subreddit/comments/POST_ID/...');
 }
 
+// Function to refresh Reddit access token
+async function refreshAccessToken() {
+  const clientId = process.env.REDDIT_CLIENT_ID || "ox_IpudOacNTrC68D7yZkw";
+  const clientSecret = process.env.REDDIT_CLIENT_SECRET || "ouetFZNFOeiMNqmT0NNQnqmR3IAgXA";
+  const username = process.env.REDDIT_USERNAME || "Commercial_Term_8918";
+  const password = process.env.REDDIT_PASSWORD || "Yadidiah@Humai.30";
+
+  const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+
+  try {
+    const response = await fetch("https://www.reddit.com/api/v1/access_token", {
+      method: "POST",
+      headers: {
+        "User-Agent": "MyRedditBot/1.0 by u/Commercial_Term_8918",
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "password",
+        username,
+        password,
+      }),
+    });
+
+    const data = await response.json();
+    
+    if (data.access_token) {
+      // Update the environment variable for the current session
+      process.env.REDDIT_ACCESS_TOKEN = data.access_token;
+      console.log('Reddit access token refreshed successfully');
+      return data.access_token;
+    } else {
+      throw new Error(`Failed to get access token: ${JSON.stringify(data)}`);
+    }
+  } catch (error) {
+    console.error("Error refreshing token:", error.message);
+    throw error;
+  }
+}
+
 // Internal function to post comment
-async function postComment({ thingId, text }) {
+async function postComment({ thingId, text, isRetry = false }) {
   const url = "https://oauth.reddit.com/api/comment";
 
   const formData = new URLSearchParams({
@@ -38,11 +78,24 @@ async function postComment({ thingId, text }) {
     method: "POST",
     headers: {
       "Authorization": `bearer ${process.env.REDDIT_ACCESS_TOKEN}`,
-      "User-Agent": "MyRedditBot/1.0 by u/YourUsername",
+      "User-Agent": "MyRedditBot/1.0 by u/Commercial_Term_8918",
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: formData.toString(),
   });
+
+  // Check if response is HTML (indicates auth error)
+  const contentType = response.headers.get("content-type");
+  if (contentType && contentType.includes("text/html")) {
+    // Token likely expired, try to refresh and retry once
+    if (!isRetry) {
+      console.log('Token appears to be expired or invalid. Attempting to refresh...');
+      await refreshAccessToken();
+      return postComment({ thingId, text, isRetry: true });
+    } else {
+      throw new Error('Authentication failed after token refresh. Please check your Reddit credentials.');
+    }
+  }
 
   const result = await response.json();
   return result;

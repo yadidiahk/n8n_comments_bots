@@ -12,11 +12,11 @@ tiktok-submit-button-not-found.png
 tiktok-post-submit-screenshot.png
 tiktok-error-screenshot.png
 
-token.js
-# OAuth tokens - needed locally but not in git
-x_tokens.json
-youtube_tokens.json
-x_pkce.json
+# token.js
+# # OAuth tokens - needed locally but not in git
+# x_tokens.json
+# youtube_tokens.json
+# x_pkce.json
 
 # Browser profiles - contain session data
 linkedin_profile/
@@ -29,4 +29,4 @@ reddit-*.png
 twitter-*.png
 comment-box-not-found.png
 
-exec -l/ 
+exec -l/

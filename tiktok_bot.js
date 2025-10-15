@@ -324,7 +324,7 @@ export async function postTikTokComment(videoUrl, commentText) {
       await delay(3000);
       
       // Check for error messages immediately
-      const errorMessages = await page.evaluate(() => {
+      const errorInfo = await page.evaluate(() => {
         const errorElements = document.querySelectorAll('[class*="error" i], [class*="Error" i], [data-e2e*="error"], .tiktok-error, [role="alert"]');
         const messages = [];
         errorElements.forEach(el => {
@@ -341,14 +341,54 @@ export async function postTikTokComment(videoUrl, commentText) {
           }
         });
         
-        return messages;
+        // Check the entire page text for specific error messages
+        const bodyText = document.body.innerText || '';
+        const rateLimitPattern = /maximum number of attempts|try again later|too many attempts/i;
+        const wrongPasswordPattern = /wrong password|incorrect password|password is incorrect/i;
+        const accountLockedPattern = /account (is )?locked|temporarily (suspended|blocked)/i;
+        
+        return {
+          messages,
+          bodyText: bodyText.toLowerCase(),
+          isRateLimited: rateLimitPattern.test(bodyText),
+          isWrongPassword: wrongPasswordPattern.test(bodyText),
+          isAccountLocked: accountLockedPattern.test(bodyText)
+        };
       });
       
-      if (errorMessages.length > 0) {
-        console.log("⚠️  ERROR MESSAGES DETECTED ON PAGE:");
-        errorMessages.forEach((msg, i) => console.log(`  ${i + 1}. ${msg}`));
+      if (errorInfo.messages.length > 0 || errorInfo.isRateLimited || errorInfo.isWrongPassword || errorInfo.isAccountLocked) {
+        console.log("⚠️  ERROR DETECTED ON PAGE:");
+        
+        if (errorInfo.messages.length > 0) {
+          errorInfo.messages.forEach((msg, i) => console.log(`  ${i + 1}. ${msg}`));
+        }
+        
         await page.screenshot({ path: 'tiktok-login-error-detected.png', fullPage: true });
-        throw new Error(`TikTok login error: ${errorMessages.join('; ')}`);
+        
+        if (errorInfo.isRateLimited) {
+          console.log("\n🚫 RATE LIMITED: TikTok has blocked login attempts temporarily.");
+          console.log("\n💡 Solutions:");
+          console.log("   1. Wait 15-30 minutes before trying again");
+          console.log("   2. Try from a different network (different IP address)");
+          console.log("   3. Use a VPN to change your IP address");
+          console.log("   4. Clear the tiktok_profile folder and try again");
+          console.log("   5. Complete a manual login first to reset the rate limit");
+          throw new Error("TikTok rate limit: Maximum number of attempts reached. Try again later.");
+        }
+        
+        if (errorInfo.isWrongPassword) {
+          console.log("\n❌ WRONG PASSWORD detected");
+          console.log("   Please verify your TIKTOK_PASS in .env file");
+          throw new Error("TikTok login error: Wrong password");
+        }
+        
+        if (errorInfo.isAccountLocked) {
+          console.log("\n🔒 ACCOUNT LOCKED");
+          console.log("   Your TikTok account may be temporarily locked");
+          throw new Error("TikTok login error: Account locked");
+        }
+        
+        throw new Error(`TikTok login error: ${errorInfo.messages.join('; ')}`);
       }
       
       console.log("No immediate errors detected. Waiting for navigation...");

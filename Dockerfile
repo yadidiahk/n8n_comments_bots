@@ -1,5 +1,5 @@
 # Use Node.js LTS version with Debian base for better Puppeteer support
-FROM node:20-bullseye-slim
+FROM node:20-bookworm-slim
 
 # Set working directory
 WORKDIR /app

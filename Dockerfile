@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Install noVNC and websockify for browser-based remote access ---
-RUN pip3 install websockify==0.10.0
+RUN pip3 install --break-system-packages websockify==0.10.0
 RUN git clone https://github.com/novnc/noVNC.git /opt/noVNC && \
     git clone https://github.com/novnc/websockify /opt/noVNC/utils/websockify
 

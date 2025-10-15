@@ -349,11 +349,23 @@ TIKTOK_PASS=your_tiktok_password
 - Press `Y` to confirm
 - Press `Enter` to save
 
-### 5.3 Upload OAuth Token Files
+### 5.3 OAuth Token Setup
 
-You need to transfer your OAuth token files to the VM.
+You have **3 options** for setting up OAuth tokens:
 
-**Option A: Use SCP (from your Mac)**
+#### **Option A: Generate Tokens Directly on VM (RECOMMENDED)** ✨
+
+This is the easiest way - generate tokens directly on the VM after deployment.
+
+**Skip this step for now and come back after Step 6 (Deploy).** Once your app is running, you'll be able to run the OAuth flows directly on the VM using noVNC.
+
+See **"Step 6.5: Generate OAuth Tokens on VM"** below for instructions.
+
+---
+
+#### **Option B: Upload Token Files (If you already have them)**
+
+If you already generated tokens locally:
 
 ```bash
 # From your local machine (new terminal window)
@@ -365,11 +377,13 @@ gcloud compute scp youtube_tokens.json leadgen-bot-vm:~/leadgen-comment-bot/ --z
 # Upload x_tokens.json
 gcloud compute scp x_tokens.json leadgen-bot-vm:~/leadgen-comment-bot/ --zone=us-central1-a
 
-# Upload x_pkce.json
+# Upload x_pkce.json (if exists)
 gcloud compute scp x_pkce.json leadgen-bot-vm:~/leadgen-comment-bot/ --zone=us-central1-a
 ```
 
-**Option B: Copy-Paste Content**
+---
+
+#### **Option C: Copy-Paste Content (Manual)**
 
 On the VM:
 
@@ -383,11 +397,11 @@ nano youtube_tokens.json
 # Create x_tokens.json
 nano x_tokens.json
 # Paste content from your local file, then Ctrl+X, Y, Enter
-
-# Create x_pkce.json
-nano x_pkce.json
-# Paste content from your local file, then Ctrl+X, Y, Enter
 ```
+
+---
+
+**💡 Recommendation:** Use **Option A** - just deploy first and generate tokens on the VM. Much easier!
 
 ### 5.4 Verify Files
 
@@ -456,6 +470,104 @@ curl http://localhost:3000/health
 # Test API info
 curl http://localhost:3000/
 ```
+
+---
+
+### 6.5 Generate OAuth Tokens on VM (RECOMMENDED METHOD)
+
+If you didn't upload token files earlier, generate them now directly on the VM. This is actually **easier** than copying files!
+
+#### Step 1: Configure Firewall for OAuth Callbacks
+
+OAuth needs port 3000 accessible temporarily for callbacks.
+
+**In GCP Console:**
+1. Go to **VPC Network** → **Firewall**
+2. Find the rule `allow-leadgen-api` (you'll create this in Step 7)
+3. Or create it now if you haven't yet
+
+#### Step 2: Install Node Dependencies (if needed)
+
+```bash
+cd ~/leadgen-comment-bot
+
+# Make sure dependencies are installed
+npm install
+```
+
+#### Step 3: Generate YouTube OAuth Token
+
+```bash
+# Stop docker container temporarily
+docker-compose down
+
+# Run YouTube auth
+node youtube_bot.js auth
+```
+
+This will:
+1. Start a local server on port 3000
+2. Print a URL like: `Open http://localhost:3000 to start YouTube OAuth flow`
+
+**On your local machine**, open browser to:
+```
+http://YOUR_VM_IP:3000
+```
+
+Then:
+1. Click "Authorize with YouTube"
+2. Sign in with your Google account
+3. Grant permissions
+4. You'll see "Authorization complete! Tokens saved."
+5. Token file `youtube_tokens.json` is now created!
+
+**Kill the auth server:**
+```bash
+# Press Ctrl+C to stop the auth server
+```
+
+#### Step 4: Generate Twitter/X OAuth Token
+
+Twitter tokens are generated automatically on first API call. You'll do this later when testing.
+
+For now, just make sure your `.env` has:
+```env
+X_CLIENT_ID=your_twitter_client_id
+X_CLIENT_SECRET=your_twitter_client_secret
+```
+
+The tokens (`x_tokens.json`, `x_pkce.json`) will be created automatically on first use.
+
+#### Step 5: Reddit Token
+
+Reddit tokens need to be generated using curl (or you can use Postman).
+
+See `REDDIT_SETUP.md` for detailed instructions. Quick version:
+
+```bash
+# Get access token (replace with your credentials)
+curl -X POST https://www.reddit.com/api/v1/access_token \
+  --user 'YOUR_CLIENT_ID:YOUR_CLIENT_SECRET' \
+  --data 'grant_type=password&username=YOUR_USERNAME&password=YOUR_PASSWORD'
+```
+
+Copy the `access_token` from response and add to `.env`:
+```bash
+nano .env
+# Add: REDDIT_ACCESS_TOKEN=your_token_here
+```
+
+#### Step 6: Restart Docker Container
+
+```bash
+# Start the application again
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f
+```
+
+**All OAuth tokens are now set up!** ✅
 
 ---
 

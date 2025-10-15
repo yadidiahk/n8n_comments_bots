@@ -62,15 +62,29 @@ nano .env
 
 ---
 
-### Phase 5: Upload OAuth Tokens
+### Phase 5: Generate OAuth Tokens (RECOMMENDED)
 
-**From your local machine (new terminal):**
+**Option A: Generate on VM (Easiest)** ✨
+
+After deployment, run these on the VM:
+
 ```bash
-cd /Users/yadidiah/Desktop/LeadGenCodes/app
+# YouTube OAuth
+docker-compose down
+node youtube_bot.js auth
+# Open http://YOUR_VM_IP:3000 in browser, authorize, then Ctrl+C
+docker-compose up -d
 
+# Twitter OAuth - automatic on first API call
+# Reddit OAuth - use curl to get token, add to .env
+```
+
+**Option B: Upload from Local (If you already have them)**
+```bash
+# From your local machine
+cd /Users/yadidiah/Desktop/LeadGenCodes/app
 gcloud compute scp youtube_tokens.json leadgen-bot-vm:~/leadgen-bot/ --zone=us-central1-a
 gcloud compute scp x_tokens.json leadgen-bot-vm:~/leadgen-bot/ --zone=us-central1-a
-gcloud compute scp x_pkce.json leadgen-bot-vm:~/leadgen-bot/ --zone=us-central1-a
 ```
 
 ---

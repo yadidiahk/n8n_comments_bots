@@ -261,7 +261,7 @@ app.use(['/vnc.html', '/vnc', '/vnc/'], createProxyMiddleware({
 
 console.log("✅ Proxy for noVNC active at /vnc.html");
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Social Media Comment Bot API running on port ${PORT}`);
   console.log(`Access the API at http://localhost:${PORT}`);
 });

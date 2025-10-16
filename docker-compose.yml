@@ -33,6 +33,7 @@ services:
       - youtube_profile:/app/youtube_profile
       - tiktok_profile:/app/tiktok_profile
       - reddit_profile:/app/reddit_profile
+      - twitter_profile:/app/twitter_profile
     restart: unless-stopped
     # Security options for running Chrome in Docker
     cap_add:

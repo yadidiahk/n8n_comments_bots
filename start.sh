@@ -11,12 +11,43 @@ DEPTH=${DEPTH:-24}
 NO_VNC_HOME=${NO_VNC_HOME:-/opt/noVNC}
 
 # Clean up any stale Chrome/Chromium processes and locks from previous runs
-echo "Cleaning up stale Chrome processes and profile locks..."
-pkill -9 chrome || true
-pkill -9 chromium || true
-rm -f /app/twitter_profile/SingletonLock /app/twitter_profile/SingletonSocket /app/twitter_profile/SingletonCookie 2>/dev/null || true
-rm -f /app/twitter_profile/Default/SingletonLock /app/twitter_profile/Default/SingletonSocket /app/twitter_profile/Default/SingletonCookie 2>/dev/null || true
-echo "✅ Cleanup completed"
+echo "=========================================="
+echo "🧹 Cleaning up stale Chrome processes and profile locks..."
+echo "=========================================="
+
+# Kill all Chrome/Chromium processes aggressively
+echo "Killing Chrome/Chromium processes..."
+pkill -9 -f chrome || true
+pkill -9 -f chromium || true
+sleep 2
+
+# Verify all processes are killed
+REMAINING=$(pgrep -f "chrome|chromium" | wc -l)
+if [ "$REMAINING" -gt 0 ]; then
+  echo "⚠️ Warning: $REMAINING Chrome/Chromium processes still running, killing again..."
+  pgrep -f "chrome|chromium" | xargs -r kill -9 || true
+  sleep 2
+else
+  echo "✅ All Chrome/Chromium processes terminated"
+fi
+
+# Clean lock files for all profile directories
+echo "Removing profile lock files..."
+for profile_dir in /app/twitter_profile /app/linkedin_profile /app/reddit_profile /app/tiktok_profile /app/youtube_profile; do
+  if [ -d "$profile_dir" ]; then
+    echo "Cleaning $profile_dir..."
+    rm -f "$profile_dir"/SingletonLock "$profile_dir"/SingletonSocket "$profile_dir"/SingletonCookie 2>/dev/null || true
+    rm -f "$profile_dir"/Default/SingletonLock "$profile_dir"/Default/SingletonSocket "$profile_dir"/Default/SingletonCookie 2>/dev/null || true
+    
+    # Also remove any orphaned lock files in subdirectories
+    find "$profile_dir" -type f -name "SingletonLock" -delete 2>/dev/null || true
+    find "$profile_dir" -type f -name "SingletonSocket" -delete 2>/dev/null || true
+    find "$profile_dir" -type f -name "SingletonCookie" -delete 2>/dev/null || true
+  fi
+done
+
+echo "✅ Profile lock cleanup completed"
+echo "=========================================="
 
 echo "=========================================="
 echo "Starting headful environment for Puppeteer"

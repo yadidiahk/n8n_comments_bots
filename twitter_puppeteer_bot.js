@@ -12,33 +12,54 @@ function killExistingChromeProcesses() {
     console.log("Checking for existing Chrome/Chromium processes...");
     const { execSync } = require('child_process');
     
-    // Find all Chrome/Chromium processes
-    try {
-      const result = execSync('pgrep -f "chrome|chromium"', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-      const pids = result.trim().split('\n').filter(pid => pid);
+    // Try multiple times to ensure all processes are killed
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`Process cleanup attempt ${attempt}/3...`);
       
-      if (pids.length > 0) {
-        console.log(`Found ${pids.length} Chrome/Chromium process(es): ${pids.join(', ')}`);
+      // Find all Chrome/Chromium processes
+      try {
+        const result = execSync('pgrep -f "chrome|chromium"', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+        const pids = result.trim().split('\n').filter(pid => pid);
         
-        // Kill each process
-        pids.forEach(pid => {
+        if (pids.length > 0) {
+          console.log(`Found ${pids.length} Chrome/Chromium process(es): ${pids.join(', ')}`);
+          
+          // Kill each process with SIGKILL
+          pids.forEach(pid => {
+            try {
+              console.log(`Killing process ${pid}...`);
+              execSync(`kill -9 ${pid}`, { stdio: 'ignore' });
+            } catch (e) {
+              // Process might already be dead, that's fine
+            }
+          });
+          
+          console.log("Sent kill signals to Chrome/Chromium processes");
+          // Wait longer for processes to fully terminate
+          console.log("Waiting for processes to terminate...");
+          execSync('sleep 3', { stdio: 'ignore' });
+          
+          // Check if any processes still exist
           try {
-            console.log(`Killing process ${pid}...`);
-            execSync(`kill -9 ${pid}`, { stdio: 'ignore' });
+            const stillRunning = execSync('pgrep -f "chrome|chromium"', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+            if (stillRunning.trim()) {
+              console.log(`Some processes still running, retrying...`);
+              continue;
+            }
           } catch (e) {
-            // Process might already be dead, that's fine
+            // No processes found - good!
+            console.log("✅ All Chrome/Chromium processes terminated");
+            break;
           }
-        });
-        
-        console.log("Killed existing Chrome/Chromium processes");
-        // Wait a bit for processes to fully terminate
-        require('child_process').execSync('sleep 2', { stdio: 'ignore' });
-      } else {
+        } else {
+          console.log("No existing Chrome/Chromium processes found");
+          break;
+        }
+      } catch (e) {
+        // No processes found (pgrep returns non-zero if no matches)
         console.log("No existing Chrome/Chromium processes found");
+        break;
       }
-    } catch (e) {
-      // No processes found (pgrep returns non-zero if no matches)
-      console.log("No existing Chrome/Chromium processes found");
     }
   } catch (error) {
     console.log(`Process cleanup error (non-fatal): ${error.message}`);
@@ -48,6 +69,7 @@ function killExistingChromeProcesses() {
 // Clean up Chrome profile lock files to prevent "profile in use" errors
 function cleanupProfileLocks(profilePath) {
   try {
+    const { execSync } = require('child_process');
     const lockFiles = [
       'SingletonLock',
       'SingletonSocket',
@@ -58,32 +80,72 @@ function cleanupProfileLocks(profilePath) {
     
     console.log(`Cleaning up profile lock files in: ${profilePath}`);
     
-    // Clean locks in main profile directory
-    lockFiles.forEach(lockFile => {
-      const filePath = path.join(profilePath, lockFile);
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-          console.log(`Removed lock file: ${lockFile}`);
-        } catch (e) {
-          console.log(`Could not remove ${lockFile}: ${e.message}`);
-        }
-      }
-    });
-    
-    // Clean locks in Default directory
-    if (fs.existsSync(defaultProfilePath)) {
+    // Try multiple times to ensure locks are removed
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`Lock cleanup attempt ${attempt}/3...`);
+      let allCleaned = true;
+      
+      // Clean locks in main profile directory
       lockFiles.forEach(lockFile => {
-        const filePath = path.join(defaultProfilePath, lockFile);
+        const filePath = path.join(profilePath, lockFile);
         if (fs.existsSync(filePath)) {
           try {
+            // Try to force remove with unlink
             fs.unlinkSync(filePath);
-            console.log(`Removed lock file in Default: ${lockFile}`);
+            console.log(`Removed lock file: ${lockFile}`);
           } catch (e) {
-            console.log(`Could not remove ${lockFile} in Default: ${e.message}`);
+            console.log(`Could not remove ${lockFile}: ${e.message}, trying force remove...`);
+            // Try force remove using system command
+            try {
+              execSync(`rm -f "${filePath}"`, { stdio: 'ignore' });
+            } catch (e2) {
+              console.log(`Force remove also failed for ${lockFile}`);
+              allCleaned = false;
+            }
           }
         }
       });
+      
+      // Clean locks in Default directory
+      if (fs.existsSync(defaultProfilePath)) {
+        lockFiles.forEach(lockFile => {
+          const filePath = path.join(defaultProfilePath, lockFile);
+          if (fs.existsSync(filePath)) {
+            try {
+              fs.unlinkSync(filePath);
+              console.log(`Removed lock file in Default: ${lockFile}`);
+            } catch (e) {
+              console.log(`Could not remove ${lockFile} in Default: ${e.message}, trying force remove...`);
+              // Try force remove using system command
+              try {
+                execSync(`rm -f "${filePath}"`, { stdio: 'ignore' });
+              } catch (e2) {
+                console.log(`Force remove also failed for ${lockFile} in Default`);
+                allCleaned = false;
+              }
+            }
+          }
+        });
+      }
+      
+      // Verify all locks are gone
+      let anyLocksRemain = false;
+      lockFiles.forEach(lockFile => {
+        if (fs.existsSync(path.join(profilePath, lockFile)) || 
+            fs.existsSync(path.join(defaultProfilePath, lockFile))) {
+          anyLocksRemain = true;
+        }
+      });
+      
+      if (!anyLocksRemain) {
+        console.log("✅ All profile lock files removed successfully");
+        break;
+      } else if (attempt < 3) {
+        console.log("Some locks still present, waiting and retrying...");
+        execSync('sleep 2', { stdio: 'ignore' });
+      } else {
+        console.log("⚠️ Warning: Some lock files may still be present");
+      }
     }
     
     console.log("Profile cleanup completed");
@@ -134,9 +196,20 @@ export async function postTwitterComment(tweetUrl, commentText) {
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--window-size=1280,800",
-        "--start-maximized"
+        "--start-maximized",
+        "--disable-browser-side-navigation",
+        "--disable-features=site-per-process",
+        "--disable-blink-features=AutomationControlled",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding"
       ],
-      defaultViewport: null
+      defaultViewport: null,
+      // Important: Don't reuse existing browser profile if it's locked
+      timeout: 60000,
+      protocolTimeout: 60000
     };
 
     // Only set executablePath if explicitly provided or if we can find Chrome
@@ -176,7 +249,12 @@ export async function postTwitterComment(tweetUrl, commentText) {
     
     // Clean up profile locks before launching browser
     cleanupProfileLocks(profilePath);
-
+    
+    // Wait a bit to ensure all cleanup is complete
+    console.log("Waiting for cleanup to complete...");
+    await delay(3000);
+    
+    console.log("Launching Puppeteer browser...");
     browser = await puppeteer.launch(launchOptions);
     page = await browser.newPage();
 

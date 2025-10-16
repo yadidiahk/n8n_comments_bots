@@ -8,6 +8,77 @@ dotenv.config();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Browser instance management
+let linkedinBrowser = null;
+let linkedinBrowserLock = false;
+
+// Function to get or create browser instance
+async function getLinkedInBrowser() {
+  // Wait if another request is launching the browser
+  let waitCount = 0;
+  while (linkedinBrowserLock && waitCount < 30) {
+    console.log("Waiting for another browser launch to complete...");
+    await delay(1000);
+    waitCount++;
+  }
+  
+  // Check if existing browser is still connected
+  if (linkedinBrowser && linkedinBrowser.isConnected()) {
+    console.log("Reusing existing browser instance");
+    return linkedinBrowser;
+  }
+  
+  // Lock to prevent concurrent launches
+  linkedinBrowserLock = true;
+  
+  try {
+    console.log("Launching new browser instance...");
+    
+    const profilePath = './linkedin_profile';
+    
+    // Only kill processes if we don't have a working browser
+    if (!linkedinBrowser || !linkedinBrowser.isConnected()) {
+      killExistingChromeProcesses();
+      cleanupProfileLocks(profilePath);
+      await delay(2000);
+    }
+    
+    const launchOptions = {
+      headless: false,
+      userDataDir: profilePath,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--window-size=1280,800",
+        "--start-maximized"
+      ],
+      defaultViewport: null
+    };
+
+    if (process.env.CHROME_BIN) {
+      launchOptions.executablePath = process.env.CHROME_BIN;
+    } else if (process.platform === 'linux') {
+      launchOptions.executablePath = '/usr/bin/chromium';
+    }
+
+    linkedinBrowser = await puppeteer.launch(launchOptions);
+    
+    // Handle browser disconnection
+    linkedinBrowser.on('disconnected', () => {
+      console.log("Browser disconnected, clearing instance");
+      linkedinBrowser = null;
+    });
+    
+    console.log("Browser launched successfully");
+    return linkedinBrowser;
+    
+  } finally {
+    linkedinBrowserLock = false;
+  }
+}
+
 // Kill any existing Chrome/Chromium processes
 function killExistingChromeProcesses() {
   try {
@@ -69,7 +140,7 @@ function killExistingChromeProcesses() {
 // Clean up Chrome profile lock files to prevent "profile in use" errors
 function cleanupProfileLocks(profilePath) {
   try {
-    const { execSync } = require('child_process');
+    // execSync is already imported at the top of the file
     const lockFiles = [
       'SingletonLock',
       'SingletonSocket',
@@ -160,51 +231,14 @@ export async function postLinkedInComment(postUrl, commentText) {
     throw new Error("Both postUrl and commentText are required");
   }
 
-  
   let browser;
   let page;
-  
 
   try {
-
-    console.log("Launching local Chrome in headful mode...");
+    // Get or create browser instance (reuse existing if available)
+    browser = await getLinkedInBrowser();
     
-    const profilePath = './linkedin_profile';
-    const launchOptions = {
-      headless: false, // Headful mode so you can see it in VNC
-      userDataDir: profilePath,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--window-size=1280,800",
-        "--start-maximized"
-      ],
-      defaultViewport: null
-    };
-
-    // Only set executablePath if explicitly provided or on Linux
-    if (process.env.CHROME_BIN) {
-      launchOptions.executablePath = process.env.CHROME_BIN;
-    } else if (process.platform === 'linux') {
-      launchOptions.executablePath = '/usr/bin/chromium';
-    }
-    // On macOS and Windows, let Puppeteer find Chrome automatically
-
-    // Kill any existing Chrome processes first
-    killExistingChromeProcesses();
-    
-    // Clean up profile locks before launching browser
-    cleanupProfileLocks(profilePath);
-    
-    // Wait a bit to ensure all cleanup is complete
-    console.log("Waiting for cleanup to complete...");
-    await delay(3000);
-
-    browser = await puppeteer.launch(launchOptions);
-
-
+    // Create a new page for this request
     page = await browser.newPage();
 
     await page.setViewport({ width: 1280, height: 800 });
@@ -768,23 +802,8 @@ export async function postLinkedInComment(postUrl, commentText) {
     console.log("Comment posted successfully!");
     await delay(1500);
     
-    // Cleanup: close all other tabs or popups
-    try {
-      const pages = await browser.pages();
-      if (pages.length > 1) {
-        console.log(`Closing ${pages.length - 1} extra tabs...`);
-        for (let i = 1; i < pages.length; i++) {
-          try {
-            await pages[i].close();
-          } catch (e) {
-            console.log(`Error closing tab ${i}:`, e.message);
-          }
-        }
-      }
-      console.log("All extra tabs closed.");
-    } catch (cleanupError) {
-      console.log("Cleanup error:", cleanupError.message);
-    }
+    // Note: We don't close other tabs here anymore since the browser is shared
+    // Each request's page will be closed in the finally block
     
     return {
       success: true,
@@ -807,9 +826,15 @@ export async function postLinkedInComment(postUrl, commentText) {
     }
     throw error;
   } finally {
-    if (browser) {
-      await browser.close();
-      console.log("Browser closed.");
+    // Close the page but keep the browser instance alive for reuse
+    if (page) {
+      try {
+        await page.close();
+        console.log("Page closed (browser kept alive for reuse).");
+      } catch (e) {
+        console.log("Error closing page:", e.message);
+      }
     }
+    // Note: Browser is NOT closed here - it's reused for the next request
   }
 }

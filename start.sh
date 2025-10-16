@@ -10,6 +10,14 @@ SCREEN_HEIGHT=${SCREEN_HEIGHT:-800}
 DEPTH=${DEPTH:-24}
 NO_VNC_HOME=${NO_VNC_HOME:-/opt/noVNC}
 
+# Clean up any stale Chrome/Chromium processes and locks from previous runs
+echo "Cleaning up stale Chrome processes and profile locks..."
+pkill -9 chrome || true
+pkill -9 chromium || true
+rm -f /app/twitter_profile/SingletonLock /app/twitter_profile/SingletonSocket /app/twitter_profile/SingletonCookie 2>/dev/null || true
+rm -f /app/twitter_profile/Default/SingletonLock /app/twitter_profile/Default/SingletonSocket /app/twitter_profile/Default/SingletonCookie 2>/dev/null || true
+echo "✅ Cleanup completed"
+
 echo "=========================================="
 echo "Starting headful environment for Puppeteer"
 echo "=========================================="

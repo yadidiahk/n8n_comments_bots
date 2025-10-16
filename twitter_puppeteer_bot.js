@@ -6,6 +6,45 @@ dotenv.config();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Kill any existing Chrome/Chromium processes
+function killExistingChromeProcesses() {
+  try {
+    console.log("Checking for existing Chrome/Chromium processes...");
+    const { execSync } = require('child_process');
+    
+    // Find all Chrome/Chromium processes
+    try {
+      const result = execSync('pgrep -f "chrome|chromium"', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+      const pids = result.trim().split('\n').filter(pid => pid);
+      
+      if (pids.length > 0) {
+        console.log(`Found ${pids.length} Chrome/Chromium process(es): ${pids.join(', ')}`);
+        
+        // Kill each process
+        pids.forEach(pid => {
+          try {
+            console.log(`Killing process ${pid}...`);
+            execSync(`kill -9 ${pid}`, { stdio: 'ignore' });
+          } catch (e) {
+            // Process might already be dead, that's fine
+          }
+        });
+        
+        console.log("Killed existing Chrome/Chromium processes");
+        // Wait a bit for processes to fully terminate
+        require('child_process').execSync('sleep 2', { stdio: 'ignore' });
+      } else {
+        console.log("No existing Chrome/Chromium processes found");
+      }
+    } catch (e) {
+      // No processes found (pgrep returns non-zero if no matches)
+      console.log("No existing Chrome/Chromium processes found");
+    }
+  } catch (error) {
+    console.log(`Process cleanup error (non-fatal): ${error.message}`);
+  }
+}
+
 // Clean up Chrome profile lock files to prevent "profile in use" errors
 function cleanupProfileLocks(profilePath) {
   try {
@@ -132,6 +171,9 @@ export async function postTwitterComment(tweetUrl, commentText) {
     }
     // On macOS and Windows, let Puppeteer find Chrome automatically
 
+    // Kill any existing Chrome processes first
+    killExistingChromeProcesses();
+    
     // Clean up profile locks before launching browser
     cleanupProfileLocks(profilePath);
 

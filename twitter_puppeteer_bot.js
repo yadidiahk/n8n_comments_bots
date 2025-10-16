@@ -2,6 +2,7 @@ import puppeteer from "puppeteer";
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 dotenv.config();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -10,7 +11,6 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function killExistingChromeProcesses() {
   try {
     console.log("Checking for existing Chrome/Chromium processes...");
-    const { execSync } = require('child_process');
     
     // Try multiple times to ensure all processes are killed
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -69,7 +69,6 @@ function killExistingChromeProcesses() {
 // Clean up Chrome profile lock files to prevent "profile in use" errors
 function cleanupProfileLocks(profilePath) {
   try {
-    const { execSync } = require('child_process');
     const lockFiles = [
       'SingletonLock',
       'SingletonSocket',
@@ -194,19 +193,39 @@ export async function postTwitterComment(tweetUrl, commentText) {
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
-        "--disable-gpu",
         "--window-size=1280,800",
         "--start-maximized",
-        "--disable-browser-side-navigation",
-        "--disable-features=site-per-process",
+        
+        // Anti-detection flags
         "--disable-blink-features=AutomationControlled",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-web-security",
+        "--disable-features=VizDisplayCompositor",
+        
+        // Performance and stability
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding"
+        "--disable-renderer-backgrounding",
+        "--disable-hang-monitor",
+        "--disable-prompt-on-repost",
+        "--disable-sync",
+        
+        // Appearance
+        "--disable-infobars",
+        "--enable-features=NetworkService,NetworkServiceInProcess",
+        
+        // Language and locale
+        "--lang=en-US,en",
+        "--accept-lang=en-US,en",
+        
+        // Media
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream"
       ],
       defaultViewport: null,
+      ignoreDefaultArgs: ['--enable-automation'],
       // Important: Don't reuse existing browser profile if it's locked
       timeout: 60000,
       protocolTimeout: 60000
@@ -258,31 +277,58 @@ export async function postTwitterComment(tweetUrl, commentText) {
     browser = await puppeteer.launch(launchOptions);
     page = await browser.newPage();
 
-    // Set a realistic user agent
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    // Set a realistic, recent user agent (Chrome 131)
+    await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
 
     await page.setViewport({ width: 1280, height: 800 });
 
-    // Enhanced anti-detection
+    // Enhanced anti-detection - comprehensive stealth mode
     await page.evaluateOnNewDocument(() => { 
-      // Hide webdriver flag
+      // Remove webdriver property completely
       Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
+        get: () => undefined,
       });
       
-      // Mock plugins
+      // Override automation indicators
+      delete navigator.__proto__.webdriver;
+      
+      // Mock plugins realistically
       Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
+        get: () => {
+          return [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+          ];
+        },
       });
       
-      // Mock languages
+      // Plugin length
+      Object.defineProperty(navigator.plugins, 'length', {
+        get: () => 3,
+      });
+      
+      // Languages
       Object.defineProperty(navigator, 'languages', {
         get: () => ['en-US', 'en'],
       });
       
+      // Platform
+      Object.defineProperty(navigator, 'platform', {
+        get: () => 'Linux x86_64',
+      });
+      
+      // Vendor
+      Object.defineProperty(navigator, 'vendor', {
+        get: () => 'Google Inc.',
+      });
+      
       // Chrome runtime
       window.chrome = {
-        runtime: {}
+        runtime: {},
+        loadTimes: function() {},
+        csi: function() {},
+        app: {}
       };
       
       // Permissions
@@ -292,6 +338,51 @@ export async function postTwitterComment(tweetUrl, commentText) {
           Promise.resolve({ state: Notification.permission }) :
           originalQuery(parameters)
       );
+      
+      // Override toString to hide proxy
+      const originalToString = Function.prototype.toString;
+      Function.prototype.toString = function() {
+        if (this === window.navigator.permissions.query) {
+          return 'function query() { [native code] }';
+        }
+        return originalToString.apply(this, arguments);
+      };
+      
+      // Battery API
+      Object.defineProperty(navigator, 'getBattery', {
+        value: () => Promise.resolve({
+          charging: true,
+          chargingTime: 0,
+          dischargingTime: Infinity,
+          level: 1
+        })
+      });
+      
+      // Connection
+      Object.defineProperty(navigator, 'connection', {
+        value: {
+          effectiveType: '4g',
+          rtt: 50,
+          downlink: 10,
+          saveData: false
+        },
+        writable: true
+      });
+      
+      // Hardware concurrency
+      Object.defineProperty(navigator, 'hardwareConcurrency', {
+        get: () => 8,
+      });
+      
+      // Device memory
+      Object.defineProperty(navigator, 'deviceMemory', {
+        get: () => 8,
+      });
+      
+      // Mock notification permission
+      Object.defineProperty(Notification, 'permission', {
+        get: () => 'default'
+      });
     });
 
     console.log("Checking if already logged in...");
@@ -603,12 +694,18 @@ export async function postTwitterComment(tweetUrl, commentText) {
       const pageContent = await page.content();
       const pageText = await page.evaluate(() => document.body ? document.body.innerText : '');
       
-      if (pageContent.includes('unusual') || pageContent.includes('verify') || 
-          pageText.includes('unusual') || pageText.includes('Enter your phone number or username')) {
+      // Check what Twitter is asking for
+      const isVerificationScreen = pageContent.includes('unusual') || pageContent.includes('verify') || 
+          pageText.includes('unusual') || pageText.includes('Enter your phone number or username') ||
+          pageText.includes('confirmation') || pageText.includes('Verify') || pageText.includes('suspicious');
+      
+      if (isVerificationScreen) {
         console.log("\n🔍 ═══════════════════════════════════════════════════════");
         console.log("   VERIFICATION REQUIRED");
         console.log("   ═══════════════════════════════════════════════════════");
         console.log("   Twitter is asking for additional confirmation.");
+        console.log("   ");
+        console.log("   Page text preview:", pageText.substring(0, 200));
         console.log("   ");
         console.log("   🤖 AUTO MODE: Bot will attempt to handle this automatically");
         console.log("   👤 MANUAL MODE: You can also complete it manually in the browser");
@@ -619,14 +716,18 @@ export async function postTwitterComment(tweetUrl, commentText) {
         
         await delay(3000);
         
-        // Try entering username again if asked
+        // Try multiple verification attempts with different data
         const verificationSelectors = [
           'input[data-testid="ocfEnterTextTextInput"]',
           'input[name="text"]',
-          'input[type="text"]'
+          'input[type="text"]',
+          'input[autocomplete="username"]',
+          'input[autocomplete="email"]',
+          'input[autocomplete="tel"]'
         ];
         
         let verificationField = null;
+        let usedSelector = null;
         for (const selector of verificationSelectors) {
           try {
             const field = await page.$(selector);
@@ -634,6 +735,7 @@ export async function postTwitterComment(tweetUrl, commentText) {
               const isVisible = await field.isVisible();
               if (isVisible) {
                 verificationField = field;
+                usedSelector = selector;
                 console.log(`Found verification field with selector: ${selector}`);
                 break;
               }
@@ -644,52 +746,75 @@ export async function postTwitterComment(tweetUrl, commentText) {
         }
         
         if (verificationField) {
-          console.log("Clearing and entering username for verification...");
+          // Determine what to enter based on what Twitter is asking
+          console.log("Analyzing what Twitter is asking for...");
+          const placeholder = await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            return el ? el.placeholder || el.getAttribute('aria-label') || '' : '';
+          }, usedSelector);
           
-          // Clear the field first (might have email in it)
-          await verificationField.click({ clickCount: 3 });
-          await delay(300);
-          await page.keyboard.press('Backspace');
-          await delay(500);
+          console.log(`Input placeholder/label: "${placeholder}"`);
           
-          // Enter the username (Twitter often wants the @handle, not email)
-          // Use TWITTER_USERNAME if set, otherwise extract from email
-          let usernameToEnter = twitterHandle || username;
+          let valueToEnter = '';
           
-          if (!twitterHandle && username.includes('@')) {
-            // If it's an email and no handle specified, try just the part before @
-            usernameToEnter = username.split('@')[0];
-            console.log(`No TWITTER_USERNAME set, using email part: ${usernameToEnter}`);
-          } else if (twitterHandle) {
-            console.log(`Using TWITTER_USERNAME from env: ${twitterHandle}`);
-          }
-          
-          await verificationField.type(usernameToEnter, { delay: 100 });
-          console.log("Verification username entered");
-          await delay(1500);
-          
-          // Click next/verify button
-          console.log("Looking for Next button on verification page...");
-          const nextClicked = await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
-            const nextBtn = buttons.find(btn => {
-              const text = btn.textContent?.toLowerCase();
-              return text && (text.includes('next') || text.includes('verify') || text.includes('confirm'));
-            });
-            if (nextBtn && nextBtn.offsetParent !== null) {
-              nextBtn.click();
-              return true;
-            }
-            return false;
-          });
-          
-          if (nextClicked) {
-            console.log("Verification Next button clicked");
+          // Determine what to enter
+          if (placeholder.toLowerCase().includes('phone') || placeholder.toLowerCase().includes('tel')) {
+            console.log("⚠️ Twitter is asking for phone number - this needs manual entry");
+            valueToEnter = null; // Can't auto-fill phone
+          } else if (placeholder.toLowerCase().includes('email')) {
+            console.log("Twitter is asking for email");
+            valueToEnter = username.includes('@') ? username : null;
+          } else if (placeholder.toLowerCase().includes('username') || pageText.includes('username')) {
+            console.log("Twitter is asking for username/handle");
+            valueToEnter = twitterHandle || (username.includes('@') ? username.split('@')[0] : username);
           } else {
-            console.log("⚠️ Could not find Next button on verification page");
+            // Default: try username/handle
+            console.log("Unclear what Twitter wants, trying username/handle");
+            valueToEnter = twitterHandle || (username.includes('@') ? username.split('@')[0] : username);
           }
           
-          await delay(4000);
+          if (valueToEnter) {
+            console.log("Clearing and entering value for verification...");
+            
+            // Clear the field first
+            await verificationField.click({ clickCount: 3 });
+            await delay(300);
+            await page.keyboard.press('Backspace');
+            await delay(500);
+            
+            console.log(`Entering: ${valueToEnter.includes('@') ? valueToEnter : valueToEnter.substring(0, 3) + '...'}`);
+            await verificationField.type(valueToEnter, { delay: 100 });
+            console.log("Verification value entered");
+            await delay(1500);
+            
+            // Click next/verify button
+            console.log("Looking for Next button on verification page...");
+            const nextClicked = await page.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+              const nextBtn = buttons.find(btn => {
+                const text = btn.textContent?.toLowerCase();
+                return text && (text.includes('next') || text.includes('verify') || text.includes('confirm'));
+              });
+              if (nextBtn && nextBtn.offsetParent !== null) {
+                nextBtn.click();
+                return true;
+              }
+              return false;
+            });
+            
+            if (nextClicked) {
+              console.log("Verification Next button clicked");
+            } else {
+              console.log("⚠️ Could not find Next button on verification page");
+            }
+            
+            await delay(5000);
+          } else {
+            console.log("⚠️ Cannot auto-fill this verification field");
+            console.log("📋 Please complete the verification manually in the browser window");
+            console.log("⏱️  Waiting 90 seconds for you to complete it...\n");
+            await delay(90000);
+          }
         } else {
           console.log("⚠️ Could not find verification input field automatically");
           console.log("📋 Please complete the verification manually in the browser window");
@@ -703,10 +828,24 @@ export async function postTwitterComment(tweetUrl, commentText) {
         const currentUrlAfterVerification = page.url();
         console.log(`Current URL after verification: ${currentUrlAfterVerification}`);
         
-        // If still on verification/login flow, give more time
+        // If still on verification/login flow, check if it's now asking for password
         if (currentUrlAfterVerification.includes('/flow/login') || currentUrlAfterVerification.includes('/login')) {
-          console.log("⚠️ Still on login flow. If you completed verification manually, waiting a bit longer...");
-          await delay(5000);
+          console.log("Still on login flow. Checking if password screen is now showing...");
+          await delay(3000);
+          
+          // Check if password field is now available
+          const hasPasswordField = await page.evaluate(() => {
+            const passwordInputs = document.querySelectorAll('input[type="password"]');
+            return passwordInputs.length > 0 && Array.from(passwordInputs).some(inp => inp.offsetParent !== null);
+          });
+          
+          if (hasPasswordField) {
+            console.log("✓ Password field detected! Continuing to password step...");
+          } else {
+            console.log("⚠️ Still no password field. May need more verification steps.");
+            console.log("⏱️ Waiting an additional 30 seconds...");
+            await delay(30000);
+          }
         }
       }
       

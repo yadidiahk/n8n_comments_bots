@@ -2,6 +2,7 @@ import puppeteer from "puppeteer";
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 dotenv.config();
 
 
@@ -11,7 +12,6 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function killExistingChromeProcesses() {
   try {
     console.log("Checking for existing Chrome/Chromium processes...");
-    const { execSync } = require('child_process');
     
     // Try multiple times to ensure all processes are killed
     for (let attempt = 1; attempt <= 3; attempt++) {

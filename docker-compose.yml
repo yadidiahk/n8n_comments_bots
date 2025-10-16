@@ -24,6 +24,8 @@ services:
       - TIKTOK_USER=${TIKTOK_USER}
       - TIKTOK_PASS=${TIKTOK_PASS}
       - PORT=${PORT:-3000}
+      - TWITTER_USER=${TWITTER_USER}
+      - TWITTER_PASS=${TWITTER_PASS}
       - NODE_ENV=production
     volumes:
       # Persist browser profiles to maintain login sessions

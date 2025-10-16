@@ -50,11 +50,36 @@ export async function postTwitterComment(tweetUrl, commentText) {
       defaultViewport: null
     };
 
-    // Only set executablePath if explicitly provided or on Linux
+    // Only set executablePath if explicitly provided or if we can find Chrome
     if (process.env.CHROME_BIN) {
+      console.log(`Using Chrome from CHROME_BIN: ${process.env.CHROME_BIN}`);
       launchOptions.executablePath = process.env.CHROME_BIN;
     } else if (process.platform === 'linux') {
-      launchOptions.executablePath = '/usr/bin/chromium';
+      // On Linux, try to find Chrome/Chromium
+      const fs = await import('fs');
+      const possiblePaths = [
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/snap/bin/chromium'
+      ];
+      
+      let foundChrome = null;
+      for (const chromePath of possiblePaths) {
+        if (fs.existsSync(chromePath)) {
+          foundChrome = chromePath;
+          console.log(`Found Chrome at: ${chromePath}`);
+          break;
+        }
+      }
+      
+      if (foundChrome) {
+        launchOptions.executablePath = foundChrome;
+      } else {
+        console.log('⚠️ Chrome not found at common Linux paths. Letting Puppeteer try to find it...');
+        console.log('If this fails, install Chrome with: apt-get install chromium');
+      }
     }
     // On macOS and Windows, let Puppeteer find Chrome automatically
 

@@ -1,9 +1,58 @@
 import puppeteer from "puppeteer";
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 dotenv.config();
 
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Clean up Chrome profile lock files to prevent "profile in use" errors
+function cleanupProfileLocks(profilePath) {
+  try {
+    const lockFiles = [
+      'SingletonLock',
+      'SingletonSocket',
+      'SingletonCookie'
+    ];
+    
+    const defaultProfilePath = path.join(profilePath, 'Default');
+    
+    console.log(`Cleaning up profile lock files in: ${profilePath}`);
+    
+    // Clean locks in main profile directory
+    lockFiles.forEach(lockFile => {
+      const filePath = path.join(profilePath, lockFile);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+          console.log(`Removed lock file: ${lockFile}`);
+        } catch (e) {
+          console.log(`Could not remove ${lockFile}: ${e.message}`);
+        }
+      }
+    });
+    
+    // Clean locks in Default directory
+    if (fs.existsSync(defaultProfilePath)) {
+      lockFiles.forEach(lockFile => {
+        const filePath = path.join(defaultProfilePath, lockFile);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+            console.log(`Removed lock file in Default: ${lockFile}`);
+          } catch (e) {
+            console.log(`Could not remove ${lockFile} in Default: ${e.message}`);
+          }
+        }
+      });
+    }
+    
+    console.log("Profile cleanup completed");
+  } catch (error) {
+    console.log(`Profile cleanup error (non-fatal): ${error.message}`);
+  }
+}
 
 export async function postLinkedInComment(postUrl, commentText) {
   const username = process.env.LINKEDIN_USER;
@@ -26,9 +75,10 @@ export async function postLinkedInComment(postUrl, commentText) {
 
     console.log("Launching local Chrome in headful mode...");
     
+    const profilePath = './linkedin_profile';
     const launchOptions = {
       headless: false, // Headful mode so you can see it in VNC
-      userDataDir: './linkedin_profile',
+      userDataDir: profilePath,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -47,6 +97,9 @@ export async function postLinkedInComment(postUrl, commentText) {
       launchOptions.executablePath = '/usr/bin/chromium';
     }
     // On macOS and Windows, let Puppeteer find Chrome automatically
+
+    // Clean up profile locks before launching browser
+    cleanupProfileLocks(profilePath);
 
     browser = await puppeteer.launch(launchOptions);
 

@@ -1,8 +1,57 @@
 import puppeteer from "puppeteer";
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 dotenv.config();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Clean up Chrome profile lock files to prevent "profile in use" errors
+function cleanupProfileLocks(profilePath) {
+  try {
+    const lockFiles = [
+      'SingletonLock',
+      'SingletonSocket',
+      'SingletonCookie'
+    ];
+    
+    const defaultProfilePath = path.join(profilePath, 'Default');
+    
+    console.log(`Cleaning up profile lock files in: ${profilePath}`);
+    
+    // Clean locks in main profile directory
+    lockFiles.forEach(lockFile => {
+      const filePath = path.join(profilePath, lockFile);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+          console.log(`Removed lock file: ${lockFile}`);
+        } catch (e) {
+          console.log(`Could not remove ${lockFile}: ${e.message}`);
+        }
+      }
+    });
+    
+    // Clean locks in Default directory
+    if (fs.existsSync(defaultProfilePath)) {
+      lockFiles.forEach(lockFile => {
+        const filePath = path.join(defaultProfilePath, lockFile);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+            console.log(`Removed lock file in Default: ${lockFile}`);
+          } catch (e) {
+            console.log(`Could not remove ${lockFile} in Default: ${e.message}`);
+          }
+        }
+      });
+    }
+    
+    console.log("Profile cleanup completed");
+  } catch (error) {
+    console.log(`Profile cleanup error (non-fatal): ${error.message}`);
+  }
+}
 
 async function manualLogin() {
   console.log("🔧 TikTok Manual Login Helper");
@@ -14,9 +63,10 @@ async function manualLogin() {
   try {
     console.log("Launching browser...");
     
+    const profilePath = './tiktok_profile';
     const launchOptions = {
       headless: false,
-      userDataDir: './tiktok_profile',
+      userDataDir: profilePath,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -33,6 +83,9 @@ async function manualLogin() {
     } else if (process.platform === 'linux') {
       launchOptions.executablePath = '/usr/bin/chromium';
     }
+
+    // Clean up profile locks before launching browser
+    cleanupProfileLocks(profilePath);
 
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();

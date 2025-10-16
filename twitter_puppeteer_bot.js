@@ -1,8 +1,57 @@
 import puppeteer from "puppeteer";
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 dotenv.config();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Clean up Chrome profile lock files to prevent "profile in use" errors
+function cleanupProfileLocks(profilePath) {
+  try {
+    const lockFiles = [
+      'SingletonLock',
+      'SingletonSocket',
+      'SingletonCookie'
+    ];
+    
+    const defaultProfilePath = path.join(profilePath, 'Default');
+    
+    console.log(`Cleaning up profile lock files in: ${profilePath}`);
+    
+    // Clean locks in main profile directory
+    lockFiles.forEach(lockFile => {
+      const filePath = path.join(profilePath, lockFile);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+          console.log(`Removed lock file: ${lockFile}`);
+        } catch (e) {
+          console.log(`Could not remove ${lockFile}: ${e.message}`);
+        }
+      }
+    });
+    
+    // Clean locks in Default directory
+    if (fs.existsSync(defaultProfilePath)) {
+      lockFiles.forEach(lockFile => {
+        const filePath = path.join(defaultProfilePath, lockFile);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+            console.log(`Removed lock file in Default: ${lockFile}`);
+          } catch (e) {
+            console.log(`Could not remove ${lockFile} in Default: ${e.message}`);
+          }
+        }
+      });
+    }
+    
+    console.log("Profile cleanup completed");
+  } catch (error) {
+    console.log(`Profile cleanup error (non-fatal): ${error.message}`);
+  }
+}
 
 export async function postTwitterComment(tweetUrl, commentText) {
   const username = process.env.TWITTER_USER || process.env.X_USER;
@@ -36,9 +85,10 @@ export async function postTwitterComment(tweetUrl, commentText) {
   try {
     console.log("Launching browser in headful mode...");
     
+    const profilePath = './twitter_profile';
     const launchOptions = {
       headless: false, // Headful mode so you can see it
-      userDataDir: './twitter_profile',
+      userDataDir: profilePath,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -56,7 +106,6 @@ export async function postTwitterComment(tweetUrl, commentText) {
       launchOptions.executablePath = process.env.CHROME_BIN;
     } else if (process.platform === 'linux') {
       // On Linux, try to find Chrome/Chromium
-      const fs = await import('fs');
       const possiblePaths = [
         '/usr/bin/chromium',
         '/usr/bin/chromium-browser',
@@ -82,6 +131,9 @@ export async function postTwitterComment(tweetUrl, commentText) {
       }
     }
     // On macOS and Windows, let Puppeteer find Chrome automatically
+
+    // Clean up profile locks before launching browser
+    cleanupProfileLocks(profilePath);
 
     browser = await puppeteer.launch(launchOptions);
     page = await browser.newPage();
@@ -340,7 +392,6 @@ export async function postTwitterComment(tweetUrl, commentText) {
         
         // Save HTML for debugging
         const html = await page.content();
-        const fs = await import('fs');
         fs.writeFileSync('twitter-login-page.html', html);
         console.log("Page HTML saved to twitter-login-page.html");
         

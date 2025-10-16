@@ -57,6 +57,8 @@ volumes:
     driver: local
   reddit_profile:
     driver: local
+  twitter_profile:
+    driver: local
 
 
 

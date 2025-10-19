@@ -118,7 +118,27 @@ docker system prune -f
 ./deploy.sh --rebuild
 ```
 
-### Out of disk space
+### Out of disk space (ENOSPC error)
+This is common on GCP VMs with limited disk space. Run the cleanup script:
 ```bash
-docker system prune -a --volumes -f
+./cleanup-disk-space.sh
+df -h  # Check available space
+./deploy.sh --rebuild
 ```
+
+**Prevent this from happening again (automate cleanup):**
+```bash
+./setup-auto-cleanup.sh  # Interactive setup - choose daily/weekly schedule
+```
+
+If still no space:
+```bash
+# Full cleanup (removes all Docker resources)
+docker system prune -a --volumes -f
+./cleanup-disk-space.sh
+```
+
+See `DISK_SPACE_ISSUE.md` for detailed solutions including:
+- How to increase GCP VM disk size
+- Setting up automatic cleanup (cron jobs) - see `AUTOMATION_GUIDE.md`
+- Disk space monitoring

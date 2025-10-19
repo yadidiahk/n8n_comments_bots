@@ -1,0 +1,68 @@
+===============================================
+🚀 QUICK AUTOMATION SETUP FOR 30GB DISK
+===============================================
+
+Perfect for your 30GB GCP VM setup!
+
+Run this on your GCP VM:
+--------------------------
+cd /path/to/your/project
+git pull
+chmod +x setup-auto-cleanup.sh
+./setup-auto-cleanup.sh
+
+When prompted, choose:
+--------------------------
+Option 1: Every 3 days at 3 AM
+
+That's it! ✅
+
+===============================================
+
+Or Manual Setup:
+--------------------------
+crontab -e
+
+Add this line:
+0 3 */3 * * cd /path/to/project && ./cleanup-disk-space.sh >> /tmp/leadgen-cleanup.log 2>&1
+
+Save and exit.
+
+===============================================
+
+Verify it's working:
+--------------------------
+# Check cron job installed
+crontab -l
+
+# Should show:
+# 0 3 */3 * * cd /path/to/project && ./cleanup-disk-space.sh >> /tmp/leadgen-cleanup.log 2>&1
+
+# Test manually
+./cleanup-disk-space.sh
+
+# Check logs after scheduled time
+tail -f /tmp/leadgen-cleanup.log
+
+===============================================
+
+Schedule Explanation:
+--------------------------
+0 3 */3 * *
+│ │  │  │ │
+│ │  │  │ └── Day of week (any)
+│ │  │  └──── Month (any)
+│ │  └──────── Every 3 days
+│ └──────────── 3 AM
+└────────────── Minute 0 (on the hour)
+
+Runs: Day 1 at 3 AM, Day 4 at 3 AM, Day 7 at 3 AM, etc.
+
+===============================================
+
+Next cleanup will run every 3 days at 3:00 AM!
+
+With 30GB disk, this is perfect. 🎯
+
+===============================================
+

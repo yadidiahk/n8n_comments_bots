@@ -15,6 +15,30 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 echo "Working directory: $SCRIPT_DIR"
 cd "$SCRIPT_DIR"
 
+# Check available disk space
+echo ""
+echo "📊 Checking disk space..."
+AVAILABLE_SPACE=$(df "$SCRIPT_DIR" | tail -1 | awk '{print $4}')
+AVAILABLE_GB=$(echo "scale=2; $AVAILABLE_SPACE / 1024 / 1024" | bc)
+
+echo "Available disk space: ${AVAILABLE_GB}GB"
+
+if (( $(echo "$AVAILABLE_GB < 2.0" | bc -l) )); then
+    echo "⚠️  WARNING: Low disk space (${AVAILABLE_GB}GB available)"
+    echo "   Recommendation: At least 2GB free space needed"
+    echo "   Run './cleanup-disk-space.sh' to free up space"
+    echo ""
+    read -p "Continue anyway? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Deployment cancelled. Please free up disk space first."
+        exit 1
+    fi
+else
+    echo "✅ Sufficient disk space available"
+fi
+echo ""
+
 # Check if Docker and docker-compose are available
 if ! command -v docker &> /dev/null; then
     echo "❌ Error: Docker is not installed or not in PATH"

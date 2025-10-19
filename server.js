@@ -26,7 +26,8 @@ app.get('/', (req, res) => {
         method: 'POST',
         body: {
           postUrl: 'LinkedIn post URL',
-          comment: 'Comment text to post'
+          comment: 'Comment text to post',
+          postID: '(optional) Custom post ID for mapping'
         }
       },
       youtube: {
@@ -34,7 +35,8 @@ app.get('/', (req, res) => {
         method: 'POST',
         body: {
           videoUrl: 'YouTube video URL (supports all formats: standard, shorts, youtu.be, embed)',
-          comment: 'Comment text to post'
+          comment: 'Comment text to post',
+          postID: '(optional) Custom post ID for mapping'
         },
         supportedUrlFormats: [
           'https://www.youtube.com/watch?v=VIDEO_ID',
@@ -50,7 +52,8 @@ app.get('/', (req, res) => {
         method: 'POST',
         body: {
           postUrl: 'Reddit post URL',
-          comment: 'Comment text to post'
+          comment: 'Comment text to post',
+          postID: '(optional) Custom post ID for mapping'
         },
         supportedUrlFormats: [
           'https://www.reddit.com/r/subreddit/comments/POST_ID/...',
@@ -62,7 +65,8 @@ app.get('/', (req, res) => {
         method: 'POST',
         body: {
           tweetUrl: 'Twitter/X tweet URL',
-          comment: 'Reply text to post'
+          comment: 'Reply text to post',
+          postID: '(optional) Custom post ID for mapping'
         },
         supportedUrlFormats: [
           'https://twitter.com/username/status/TWEET_ID',
@@ -75,7 +79,8 @@ app.get('/', (req, res) => {
         method: 'POST',
         body: {
           tweetUrl: 'Twitter/X tweet URL',
-          comment: 'Reply text to post'
+          comment: 'Reply text to post',
+          postID: '(optional) Custom post ID for mapping'
         },
         supportedUrlFormats: [
           'https://twitter.com/username/status/TWEET_ID',
@@ -88,7 +93,8 @@ app.get('/', (req, res) => {
         method: 'POST',
         body: {
           videoUrl: 'TikTok video URL',
-          comment: 'Comment text to post'
+          comment: 'Comment text to post',
+          postID: '(optional) Custom post ID for mapping'
         },
         supportedUrlFormats: [
           'https://www.tiktok.com/@username/video/VIDEO_ID',
@@ -109,7 +115,7 @@ app.get('/health', (req, res) => {
 
 app.post('/api/linkedin/comment', async (req, res) => {
   try {
-    const { postUrl, comment } = req.body;
+    const { postUrl, comment, postID } = req.body;
 
     if (!postUrl) {
       return res.status(400).json({
@@ -129,6 +135,11 @@ app.post('/api/linkedin/comment', async (req, res) => {
     
     const result = await postLinkedInComment(postUrl, comment);
     
+    // Include postID in the response if provided
+    if (postID) {
+      result.postID = postID;
+    }
+    
     res.json(result);
   } catch (error) {
     console.error('API Error:', error.message);
@@ -141,7 +152,7 @@ app.post('/api/linkedin/comment', async (req, res) => {
 
 app.post('/api/youtube/comment', async (req, res) => {
   try {
-    const { videoUrl, comment } = req.body;
+    const { videoUrl, comment, postID } = req.body;
 
     if (!videoUrl) {
       return res.status(400).json({
@@ -161,6 +172,11 @@ app.post('/api/youtube/comment', async (req, res) => {
     
     const result = await postYouTubeComment(videoUrl, comment);
     
+    // Include postID in the response if provided
+    if (postID) {
+      result.postID = postID;
+    }
+    
     res.json(result);
   } catch (error) {
     console.error('YouTube API Error:', error.message);
@@ -173,7 +189,7 @@ app.post('/api/youtube/comment', async (req, res) => {
 
 app.post('/api/reddit/comment', async (req, res) => {
   try {
-    const { postUrl, comment } = req.body;
+    const { postUrl, comment, postID } = req.body;
 
     if (!postUrl) {
       return res.status(400).json({
@@ -193,6 +209,11 @@ app.post('/api/reddit/comment', async (req, res) => {
     
     const result = await postRedditComment(postUrl, comment);
     
+    // Include postID in the response if provided
+    if (postID) {
+      result.postID = postID;
+    }
+    
     res.json(result);
   } catch (error) {
     console.error('Reddit API Error:', error.message);
@@ -205,7 +226,7 @@ app.post('/api/reddit/comment', async (req, res) => {
 
 app.post('/api/twitter/comment', async (req, res) => {
   try {
-    const { tweetUrl, comment } = req.body;
+    const { tweetUrl, comment, postID } = req.body;
 
     if (!tweetUrl) {
       return res.status(400).json({
@@ -225,6 +246,11 @@ app.post('/api/twitter/comment', async (req, res) => {
     
     const result = await postTwitterComment(tweetUrl, comment);
     
+    // Include postID in the response if provided
+    if (postID) {
+      result.postID = postID;
+    }
+    
     res.json(result);
   } catch (error) {
     console.error('Twitter API Error:', error.message);
@@ -237,7 +263,7 @@ app.post('/api/twitter/comment', async (req, res) => {
 
 app.post('/api/twitter2/comment', async (req, res) => {
   try {
-    const { tweetUrl, comment } = req.body;
+    const { tweetUrl, comment, postID } = req.body;
 
     if (!tweetUrl) {
       return res.status(400).json({
@@ -257,6 +283,11 @@ app.post('/api/twitter2/comment', async (req, res) => {
     
     const result = await postTwitterCommentPuppeteer(tweetUrl, comment);
     
+    // Include postID in the response if provided
+    if (postID) {
+      result.postID = postID;
+    }
+    
     res.json(result);
   } catch (error) {
     console.error('Twitter Puppeteer API Error:', error.message);
@@ -269,7 +300,7 @@ app.post('/api/twitter2/comment', async (req, res) => {
 
 app.post('/api/tiktok/comment', async (req, res) => {
   try {
-    const { videoUrl, comment } = req.body;
+    const { videoUrl, comment, postID } = req.body;
 
     if (!videoUrl) {
       return res.status(400).json({
@@ -288,6 +319,11 @@ app.post('/api/tiktok/comment', async (req, res) => {
     console.log(`Received request to post TikTok comment on: ${videoUrl}`);
     
     const result = await postTikTokComment(videoUrl, comment);
+    
+    // Include postID in the response if provided
+    if (postID) {
+      result.postID = postID;
+    }
     
     res.json(result);
   } catch (error) {

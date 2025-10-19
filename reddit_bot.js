@@ -1,6 +1,25 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+// Initialize access token on module load
+let accessToken = process.env.REDDIT_ACCESS_TOKEN || null;
+
+// Automatically get access token on startup if not present
+async function initializeAccessToken() {
+  if (!accessToken) {
+    console.log('🔄 Reddit access token not found. Fetching new token...');
+    try {
+      accessToken = await refreshAccessToken();
+      console.log('✅ Reddit access token initialized successfully');
+    } catch (error) {
+      console.error('❌ Failed to initialize Reddit access token:', error.message);
+    }
+  }
+}
+
+// Call initialization (will execute when module is imported)
+initializeAccessToken().catch(err => console.error('Token initialization error:', err));
+
 // Extract post ID from Reddit URL
 function extractPostId(url) {
   // Supports formats:
@@ -83,7 +102,8 @@ async function refreshAccessToken() {
     console.log('Response Data (parsed):', JSON.stringify(data, null, 2));
     
     if (data.access_token) {
-      // Update the environment variable for the current session
+      // Update both the module variable and environment variable
+      accessToken = data.access_token;
       process.env.REDDIT_ACCESS_TOKEN = data.access_token;
       console.log('Reddit access token refreshed successfully');
       console.log('Token expires in:', data.expires_in, 'seconds');
@@ -112,9 +132,9 @@ async function postComment({ thingId, text, isRetry = false }) {
   console.log('Attempt:', isRetry ? 'RETRY' : 'INITIAL');
   console.log('Thing ID:', thingId);
   console.log('Comment length:', text.length, 'characters');
-  console.log('Access Token present:', !!process.env.REDDIT_ACCESS_TOKEN);
-  if (process.env.REDDIT_ACCESS_TOKEN) {
-    console.log('Access Token preview:', process.env.REDDIT_ACCESS_TOKEN.substring(0, 20) + '...');
+  console.log('Access Token present:', !!accessToken);
+  if (accessToken) {
+    console.log('Access Token preview:', accessToken.substring(0, 20) + '...');
   }
 
   const formData = new URLSearchParams({
@@ -129,7 +149,7 @@ async function postComment({ thingId, text, isRetry = false }) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      "Authorization": `bearer ${process.env.REDDIT_ACCESS_TOKEN}`,
+      "Authorization": `bearer ${accessToken}`,
       "User-Agent": "MyRedditBot/1.0 by u/Commercial_Term_8918",
       "Content-Type": "application/x-www-form-urlencoded",
     },
@@ -183,12 +203,13 @@ export async function postRedditComment(postUrl, comment) {
     console.log('Post URL:', postUrl);
     console.log('Comment preview:', comment.substring(0, 50) + (comment.length > 50 ? '...' : ''));
 
-    // Check if access token is configured
-    if (!process.env.REDDIT_ACCESS_TOKEN) {
-      throw new Error('REDDIT_ACCESS_TOKEN not found in environment variables. Please configure Reddit OAuth first.');
+    // Check if access token is available, fetch if not
+    if (!accessToken) {
+      console.log('Access token not found, fetching new token...');
+      accessToken = await refreshAccessToken();
     }
 
-    console.log('Access token is present in environment');
+    console.log('Access token is available');
 
     // Extract post ID from URL
     const postId = extractPostId(postUrl);

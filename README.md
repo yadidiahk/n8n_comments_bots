@@ -89,7 +89,7 @@ X_CLIENT_SECRET=your_client_secret
 TIKTOK_USER=your_email
 TIKTOK_PASS=your_password
 
-# Reddit
+# Reddit (access token fetched automatically)
 REDDIT_CLIENT_ID=your_client_id
 REDDIT_CLIENT_SECRET=your_client_secret
 REDDIT_USERNAME=your_username

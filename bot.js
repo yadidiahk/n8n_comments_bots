@@ -11,6 +11,8 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Browser instance management
 let linkedinBrowser = null;
 let linkedinBrowserLock = false;
+let linkedinPage = null; // Reuse the same page across requests
+let linkedinPageLock = false;
 
 // Function to get or create browser instance
 async function getLinkedInBrowser() {
@@ -69,6 +71,7 @@ async function getLinkedInBrowser() {
     linkedinBrowser.on('disconnected', () => {
       console.log("Browser disconnected, clearing instance");
       linkedinBrowser = null;
+      linkedinPage = null; // Clear page reference too
     });
     
     console.log("Browser launched successfully");
@@ -76,6 +79,119 @@ async function getLinkedInBrowser() {
     
   } finally {
     linkedinBrowserLock = false;
+  }
+}
+
+// Function to get or create a reusable page
+async function getLinkedInPage(browser) {
+  // Wait if another request is setting up the page
+  let waitCount = 0;
+  while (linkedinPageLock && waitCount < 30) {
+    console.log("Waiting for page setup to complete...");
+    await delay(1000);
+    waitCount++;
+  }
+  
+  // Check if we have a valid existing page
+  if (linkedinPage && !linkedinPage.isClosed()) {
+    console.log("Reusing existing page instance");
+    return linkedinPage;
+  }
+  
+  // Lock to prevent concurrent page creation
+  linkedinPageLock = true;
+  
+  try {
+    console.log("Creating new page instance...");
+    linkedinPage = await browser.newPage();
+    
+    await linkedinPage.setViewport({ width: 1280, height: 800 });
+    
+    await linkedinPage.evaluateOnNewDocument(() => { 
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+      });
+    });
+    
+    console.log("Page created successfully");
+    return linkedinPage;
+    
+  } finally {
+    linkedinPageLock = false;
+  }
+}
+
+// Check if we're already logged in by checking both URL and cookies
+async function isLoggedInToLinkedIn(page) {
+  try {
+    console.log("Checking LinkedIn login status...");
+    
+    // Method 1: Check for LinkedIn session cookies
+    const cookies = await page.cookies();
+    const hasSessionCookie = cookies.some(cookie => 
+      (cookie.name === 'li_at' || cookie.name === 'JSESSIONID') && cookie.value
+    );
+    
+    if (hasSessionCookie) {
+      console.log("✓ Session cookies found");
+    } else {
+      console.log("✗ No session cookies found");
+      return false;
+    }
+    
+    // Method 2: Navigate to feed and check URL
+    console.log("Verifying login by navigating to feed...");
+    try {
+      await page.goto("https://www.linkedin.com/feed", { 
+        waitUntil: 'domcontentloaded',
+        timeout: 30000 
+      });
+    } catch (navError) {
+      console.log("Navigation timeout, but continuing to check...");
+    }
+    
+    await delay(3000);
+    const currentUrl = page.url();
+    console.log(`Current URL: ${currentUrl}`);
+    
+    // Method 3: Check if we're on a logged-in page
+    const isOnLoginPage = currentUrl.includes("/login") || currentUrl.includes("/uas/login");
+    
+    if (isOnLoginPage) {
+      console.log("✗ On login page - not logged in");
+      return false;
+    }
+    
+    // Method 4: Check for logged-in elements on the page
+    const hasProfileElement = await page.evaluate(() => {
+      // Check for common logged-in indicators
+      const indicators = [
+        '.global-nav__me',
+        '[data-control-name="identity_welcome_message"]',
+        '.feed-identity-module',
+        'img[alt*="profile"]'
+      ];
+      
+      for (const selector of indicators) {
+        if (document.querySelector(selector)) {
+          return true;
+        }
+      }
+      return false;
+    });
+    
+    if (hasProfileElement) {
+      console.log("✓ Logged-in UI elements detected");
+      console.log("✅ Confirmed: User is logged in");
+      return true;
+    }
+    
+    console.log("✗ No logged-in UI elements found");
+    return false;
+    
+  } catch (error) {
+    console.log("Login check error:", error.message);
+    return false;
   }
 }
 
@@ -238,44 +354,26 @@ export async function postLinkedInComment(postUrl, commentText) {
     // Get or create browser instance (reuse existing if available)
     browser = await getLinkedInBrowser();
     
-    // Create a new page for this request
-    page = await browser.newPage();
-
-    await page.setViewport({ width: 1280, height: 800 });
-
-    await page.evaluateOnNewDocument(() => { 
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-      });
-    });
-      console.log("Checking if already logged in...");
-    try {
-      await page.goto("https://www.linkedin.com/feed", { 
-        waitUntil: 'domcontentloaded',
-        timeout: 30000 
-      });
-    } catch (navError) {
-      console.log("Initial navigation timeout, but continuing to check login status...");
-    }
-  
-  await delay(3000);
-  let currentUrl = page.url();
-  console.log(`Current URL: ${currentUrl}`);
-  
-  if (currentUrl.includes("/login") || currentUrl.includes("/uas/login")) {
-    console.log("Not logged in. Proceeding with login...");
+    // Get or create a reusable page
+    page = await getLinkedInPage(browser);
     
-    console.log("Navigating to LinkedIn login page...");
-    try {
-      await page.goto("https://www.linkedin.com/login", { 
-        waitUntil: 'domcontentloaded',
-        timeout: 30000 
-      });
-    } catch (navError) {
-      console.log("Login page navigation timeout, but continuing...");
-    }
+    // Check if we're already logged in (with multiple verification methods)
+    const isLoggedIn = await isLoggedInToLinkedIn(page);
     
-    await delay(3000);
+    if (!isLoggedIn) {
+      console.log("Not logged in. Proceeding with login...");
+      
+      console.log("Navigating to LinkedIn login page...");
+      try {
+        await page.goto("https://www.linkedin.com/login", { 
+          waitUntil: 'domcontentloaded',
+          timeout: 30000 
+        });
+      } catch (navError) {
+        console.log("Login page navigation timeout, but continuing...");
+      }
+      
+      await delay(3000);
     
     console.log("Looking for username field...");
     const possibleUsernameSelectors = [
@@ -324,9 +422,6 @@ export async function postLinkedInComment(postUrl, commentText) {
     if (!usernameSelector || !passwordSelector) {
       console.log("Could not find login fields, taking screenshot...");
       await page.screenshot({ path: 'login-page-debug.png', fullPage: true });
-      
-      // Get page content for debugging
-      const pageContent = await page.content();
       console.log("Page title:", await page.title());
       
       throw new Error(`Login fields not found. Username: ${!!usernameSelector}, Password: ${!!passwordSelector}. Screenshot saved.`);
@@ -353,23 +448,25 @@ export async function postLinkedInComment(postUrl, commentText) {
     
     await delay(1500);
     
-    currentUrl = page.url();
-    console.log(`Current URL after login: ${currentUrl}`);
+    const currentUrlAfterLogin = page.url();
+    console.log(`Current URL after login: ${currentUrlAfterLogin}`);
     
-    if (currentUrl.includes("/checkpoint/") || currentUrl.includes("/challenge/")) {
+    if (currentUrlAfterLogin.includes("/checkpoint/") || currentUrlAfterLogin.includes("/challenge/")) {
       console.log("LinkedIn is asking for verification. Please complete it manually.");
       console.log("The browser will remain open for 60 seconds...");
       await delay(60000);
     }
-    
-    if (currentUrl.includes("/login")) {
-      throw new Error("Login failed - still on login page. Check your credentials.");
+      
+      if (currentUrlAfterLogin.includes("/login")) {
+        throw new Error("Login failed - still on login page. Check your credentials.");
+      }
+      
+      console.log("✅ Login successful!");
+    } else {
+      console.log("✅ Already logged in! Skipping login process.");
     }
-  } else {
-    console.log("Already logged in! Skipping login process.");
-  }
-  
-  console.log("Logged in successfully! Navigating to post...");
+    
+    console.log("Navigating to post...");
   try {
     await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
   } catch (navError) {
@@ -826,15 +923,9 @@ export async function postLinkedInComment(postUrl, commentText) {
     }
     throw error;
   } finally {
-    // Close the page but keep the browser instance alive for reuse
-    if (page) {
-      try {
-        await page.close();
-        console.log("Page closed (browser kept alive for reuse).");
-      } catch (e) {
-        console.log("Error closing page:", e.message);
-      }
-    }
-    // Note: Browser is NOT closed here - it's reused for the next request
+    // Keep BOTH browser and page alive for reuse across requests
+    // This prevents re-login on every request
+    console.log("✓ Request complete. Browser and page kept alive for reuse.");
+    // Note: Browser and page are NOT closed here - they're reused for the next request
   }
 }

@@ -25,7 +25,7 @@ let isReauthenticating = false;
 const OAUTH_PORT = 4000; // Unified OAuth port for all services
 const CLIENT_ID = process.env.X_CLIENT_ID;          // from developer portal
 const CLIENT_SECRET = process.env.X_CLIENT_SECRET;  // optional, for confidential clients
-const REDIRECT_URI = `http://localhost:${OAUTH_PORT}/twitter/callback`;
+const REDIRECT_URI = `http://34.172.210.6:${OAUTH_PORT}/twitter/callback`;
 
 // Twitter login credentials for automated login
 const TWITTER_USERNAME = process.env.TWITTER_USER || process.env.X_USER;

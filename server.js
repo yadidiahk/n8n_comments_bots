@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { postLinkedInComment } from './bot.js';
 import { postYouTubeComment } from './youtube_bot.js';
 import { postRedditComment } from './reddit_bot.js';
+import { searchReddit, searchMultipleSubreddits } from './reddit_search.js';
 import { postTwitterComment } from './twitter_bot.js';
 import { postTwitterComment as postTwitterCommentPuppeteer } from './twitter_puppeteer_bot.js';
 import { postTikTokComment } from './tiktok_bot.js';
@@ -59,6 +60,32 @@ app.get('/', (req, res) => {
           'https://www.reddit.com/r/subreddit/comments/POST_ID/...',
           'https://old.reddit.com/r/subreddit/comments/POST_ID/...'
         ]
+      },
+      redditSearch: {
+        path: '/api/reddit/search',
+        method: 'POST',
+        body: {
+          keyword: 'Search term/keyword (required)',
+          sort: '(optional) Sort by: relevance, hot, top, new, comments (default: new)',
+          time: '(optional) Time filter: all, year, month, week, day, hour (default: all)',
+          limit: '(optional) Number of results (max 100, default: 25)',
+          subreddit: '(optional) Search within specific subreddit (e.g., "technology")',
+          includeNSFW: '(optional) Include NSFW content (default: false)'
+        },
+        note: 'Searches Reddit posts using native JSON API without external services'
+      },
+      redditMultiSearch: {
+        path: '/api/reddit/search/multiple',
+        method: 'POST',
+        body: {
+          keyword: 'Search term/keyword (required)',
+          subreddits: '(required) Array of subreddit names without r/ prefix',
+          sort: '(optional) Sort by: relevance, hot, top, new, comments (default: new)',
+          time: '(optional) Time filter: all, year, month, week, day, hour (default: all)',
+          limit: '(optional) Number of results per subreddit (max 100, default: 25)',
+          includeNSFW: '(optional) Include NSFW content (default: false)'
+        },
+        note: 'Searches multiple subreddits for a keyword'
       },
       twitter: {
         path: '/api/twitter/comment',
@@ -331,6 +358,80 @@ app.post('/api/tiktok/comment', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+app.post('/api/reddit/search', async (req, res) => {
+  try {
+    const { keyword, sort, time, limit, subreddit, includeNSFW } = req.body;
+
+    if (!keyword) {
+      return res.status(400).json({
+        success: false,
+        error: 'keyword is required'
+      });
+    }
+
+    console.log(`Received request to search Reddit for: ${keyword}`);
+    
+    const result = await searchReddit(keyword, {
+      sort: sort || 'new',
+      time: time || 'all',
+      limit: limit || 25,
+      subreddit: subreddit || null,
+      includeNSFW: includeNSFW || false
+    });
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Reddit Search API Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      keyword: req.body.keyword || '',
+      count: 0,
+      posts: []
+    });
+  }
+});
+
+app.post('/api/reddit/search/multiple', async (req, res) => {
+  try {
+    const { keyword, subreddits, sort, time, limit, includeNSFW } = req.body;
+
+    if (!keyword) {
+      return res.status(400).json({
+        success: false,
+        error: 'keyword is required'
+      });
+    }
+
+    if (!subreddits || !Array.isArray(subreddits) || subreddits.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'subreddits array is required and must contain at least one subreddit'
+      });
+    }
+
+    console.log(`Received request to search Reddit in multiple subreddits for: ${keyword}`);
+    
+    const result = await searchMultipleSubreddits(keyword, subreddits, {
+      sort: sort || 'new',
+      time: time || 'all',
+      limit: limit || 25,
+      includeNSFW: includeNSFW || false
+    });
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Reddit Multi-Search API Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      keyword: req.body.keyword || '',
+      totalPosts: 0,
+      subreddits: {}
     });
   }
 });

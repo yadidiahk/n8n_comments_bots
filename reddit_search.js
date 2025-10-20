@@ -1,5 +1,127 @@
 import dotenv from "dotenv";
+import puppeteer from 'puppeteer';
 dotenv.config();
+
+/**
+ * Search Reddit using Puppeteer (browser automation) - fallback when API is blocked
+ * @param {string} keyword - The search term/keyword
+ * @param {object} options - Search options
+ * @returns {Promise<Object>} Search results
+ */
+async function searchRedditWithPuppeteer(keyword, options = {}) {
+  const {
+    sort = 'new',
+    time = 'all',
+    limit = 25,
+    subreddit = null
+  } = options;
+
+  console.log('\n🤖 Using Puppeteer browser automation (API blocked)...');
+  
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled'
+      ]
+    });
+
+    const page = await browser.newPage();
+    
+    // Set realistic viewport and user agent
+    await page.setViewport({ width: 1920, height: 1080 });
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+
+    // Build URL
+    const searchQuery = encodeURIComponent(keyword);
+    let url;
+    if (subreddit) {
+      url = `https://old.reddit.com/r/${subreddit}/search?q=${searchQuery}&restrict_sr=on&sort=${sort}&t=${time}`;
+    } else {
+      url = `https://old.reddit.com/search?q=${searchQuery}&sort=${sort}&t=${time}`;
+    }
+
+    console.log('Navigating to:', url);
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    // Extract post data from the page
+    const posts = await page.evaluate((maxPosts) => {
+      const results = [];
+      const postElements = document.querySelectorAll('.thing.link');
+      
+      for (let i = 0; i < Math.min(postElements.length, maxPosts); i++) {
+        const post = postElements[i];
+        const id = post.getAttribute('data-fullname');
+        const parsedId = id ? id.replace('t3_', '') : null;
+        const titleElement = post.querySelector('.title a');
+        const subredditElement = post.querySelector('.subreddit');
+        const authorElement = post.querySelector('.author');
+        const scoreElement = post.querySelector('.score.unvoted');
+        const commentsElement = post.querySelector('.comments');
+        
+        if (titleElement && id) {
+          results.push({
+            id: id,
+            parsedId: parsedId,
+            url: `https://www.reddit.com${post.getAttribute('data-permalink')}`,
+            username: authorElement ? authorElement.textContent : 'unknown',
+            userId: null,
+            title: titleElement.textContent.trim(),
+            communityName: subredditElement ? subredditElement.textContent : 'unknown',
+            parsedCommunityName: subredditElement ? subredditElement.textContent.replace('r/', '') : 'unknown',
+            body: '',
+            html: null,
+            link: `https://www.reddit.com${post.getAttribute('data-permalink')}`,
+            numberOfComments: commentsElement ? parseInt(commentsElement.textContent.match(/\d+/)?.[0] || '0') : 0,
+            flair: null,
+            upVotes: scoreElement ? parseInt(scoreElement.textContent) : 0,
+            upVoteRatio: 0,
+            isVideo: false,
+            isAd: false,
+            over18: post.classList.contains('over18'),
+            thumbnailUrl: null,
+            imageUrls: [],
+            createdAt: new Date().toISOString(),
+            scrapedAt: new Date().toISOString(),
+            dataType: 'post'
+          });
+        }
+      }
+      
+      return results;
+    }, limit);
+
+    console.log(`✅ Found ${posts.length} posts via Puppeteer`);
+
+    return {
+      success: true,
+      keyword: keyword,
+      count: posts.length,
+      posts: posts,
+      method: 'puppeteer'
+    };
+
+  } catch (error) {
+    console.error('Puppeteer search error:', error.message);
+    return {
+      success: false,
+      keyword: keyword,
+      error: error.message,
+      count: 0,
+      posts: [],
+      method: 'puppeteer'
+    };
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+}
 
 /**
  * Search Reddit posts by keyword using Reddit's native JSON API
@@ -11,9 +133,16 @@ dotenv.config();
  * @param {string} options.subreddit - Optional: search within specific subreddit (e.g., 'technology')
  * @param {boolean} options.searchPosts - Search for posts (default: true)
  * @param {boolean} options.includeNSFW - Include NSFW content (default: false)
+ * @param {boolean} options.forcePuppeteer - Force use of Puppeteer instead of API (default: false)
  * @returns {Promise<Array>} Array of post objects
  */
 export async function searchReddit(keyword, options = {}) {
+  const { forcePuppeteer = false } = options;
+  
+  // If forced to use Puppeteer, skip API attempt
+  if (forcePuppeteer) {
+    return searchRedditWithPuppeteer(keyword, options);
+  }
   try {
     const {
       sort = 'new',
@@ -38,14 +167,14 @@ export async function searchReddit(keyword, options = {}) {
       throw new Error('Keyword is required for Reddit search');
     }
 
-    // Build the search URL
+    // Build the search URL - try old.reddit.com which is less strict
     let searchUrl;
     if (subreddit) {
       // Search within specific subreddit
-      searchUrl = `https://www.reddit.com/r/${subreddit}/search.json`;
+      searchUrl = `https://old.reddit.com/r/${subreddit}/search.json`;
     } else {
       // Search all of Reddit
-      searchUrl = 'https://www.reddit.com/search.json';
+      searchUrl = 'https://old.reddit.com/search.json';
     }
 
     // Build query parameters
@@ -66,6 +195,10 @@ export async function searchReddit(keyword, options = {}) {
     const fullUrl = `${searchUrl}?${params.toString()}`;
     console.log('Search URL:', fullUrl);
 
+    // Add a small random delay to avoid rate limiting (100-300ms)
+    const delay = Math.floor(Math.random() * 200) + 100;
+    await new Promise(resolve => setTimeout(resolve, delay));
+
     // Make the request with a realistic browser User-Agent
     const response = await fetch(fullUrl, {
       headers: {
@@ -79,13 +212,21 @@ export async function searchReddit(keyword, options = {}) {
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0'
+        'Cache-Control': 'max-age=0',
+        'DNT': '1',
+        'Referer': 'https://www.google.com/'
       }
     });
 
     console.log('Response Status:', response.status, response.statusText);
 
     if (!response.ok) {
+      // If blocked, provide helpful error message
+      if (response.status === 403) {
+        console.error('⚠️  Reddit is blocking requests from this server IP.');
+        console.error('💡 This is common for cloud/datacenter IPs.');
+        console.error('💡 Consider using Reddit OAuth API or a proxy service.');
+      }
       throw new Error(`Reddit API returned ${response.status}: ${response.statusText}`);
     }
 
@@ -150,6 +291,13 @@ export async function searchReddit(keyword, options = {}) {
   } catch (error) {
     console.error('Reddit Search Error:', error);
     console.log('========================================\n');
+    
+    // If we got a 403 error, try Puppeteer as fallback
+    if (error.message.includes('403')) {
+      console.log('🔄 Attempting fallback to Puppeteer browser automation...');
+      return searchRedditWithPuppeteer(keyword, options);
+    }
+    
     return {
       success: false,
       keyword: keyword,

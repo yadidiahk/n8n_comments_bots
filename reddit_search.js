@@ -49,41 +49,87 @@ async function searchRedditWithPuppeteer(keyword, options = {}) {
     console.log('Navigating to:', url);
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
+    // Wait for search results to load
+    await page.waitForSelector('.search-result-link, .thing, .search-result', { timeout: 10000 }).catch(() => {
+      console.log('⚠️ Search results took longer than expected to load');
+    });
+
+    // Take a screenshot for debugging (optional)
+    if (process.env.DEBUG_REDDIT_SEARCH === 'true') {
+      await page.screenshot({ path: `/tmp/reddit-search-${Date.now()}.png`, fullPage: true });
+      console.log('📸 Debug screenshot saved to /tmp/');
+    }
+
     // Extract post data from the page
     const posts = await page.evaluate((maxPosts) => {
       const results = [];
-      const postElements = document.querySelectorAll('.thing.link');
+      
+      // Try multiple selector patterns for old Reddit search results
+      let postElements = document.querySelectorAll('.search-result-link');
+      
+      if (postElements.length === 0) {
+        postElements = document.querySelectorAll('.thing.link');
+      }
+      
+      if (postElements.length === 0) {
+        postElements = document.querySelectorAll('.search-result');
+      }
+      
+      console.log(`Found ${postElements.length} post elements on page`);
       
       for (let i = 0; i < Math.min(postElements.length, maxPosts); i++) {
         const post = postElements[i];
-        const id = post.getAttribute('data-fullname');
-        const parsedId = id ? id.replace('t3_', '') : null;
-        const titleElement = post.querySelector('.title a');
-        const subredditElement = post.querySelector('.subreddit');
-        const authorElement = post.querySelector('.author');
-        const scoreElement = post.querySelector('.score.unvoted');
-        const commentsElement = post.querySelector('.comments');
         
-        if (titleElement && id) {
+        // Try to extract data - handle both old and new Reddit formats
+        let id = post.getAttribute('data-fullname');
+        let permalink = post.getAttribute('data-permalink');
+        let titleElement = post.querySelector('.title a.title, a.search-title');
+        let subredditElement = post.querySelector('.subreddit, .search-subreddit-link');
+        let authorElement = post.querySelector('.author, .search-author');
+        let scoreElement = post.querySelector('.score.unvoted, .search-score');
+        let commentsElement = post.querySelector('.comments, .search-comments');
+        
+        // For old Reddit search results
+        if (!titleElement) {
+          titleElement = post.querySelector('a.search-title');
+        }
+        
+        if (titleElement) {
+          // Extract ID from data attribute or URL
+          if (!id && titleElement.href) {
+            const match = titleElement.href.match(/comments\/([a-z0-9]+)\//);
+            if (match) {
+              id = `t3_${match[1]}`;
+            }
+          }
+          
+          const parsedId = id ? id.replace('t3_', '') : null;
+          
+          // Get permalink
+          if (!permalink && titleElement.href) {
+            const url = new URL(titleElement.href);
+            permalink = url.pathname;
+          }
+          
           results.push({
-            id: id,
-            parsedId: parsedId,
-            url: `https://www.reddit.com${post.getAttribute('data-permalink')}`,
-            username: authorElement ? authorElement.textContent : 'unknown',
+            id: id || 'unknown',
+            parsedId: parsedId || 'unknown',
+            url: titleElement.href || `https://www.reddit.com${permalink}`,
+            username: authorElement ? authorElement.textContent.trim() : 'unknown',
             userId: null,
             title: titleElement.textContent.trim(),
-            communityName: subredditElement ? subredditElement.textContent : 'unknown',
-            parsedCommunityName: subredditElement ? subredditElement.textContent.replace('r/', '') : 'unknown',
+            communityName: subredditElement ? subredditElement.textContent.trim() : 'unknown',
+            parsedCommunityName: subredditElement ? subredditElement.textContent.trim().replace('r/', '') : 'unknown',
             body: '',
             html: null,
-            link: `https://www.reddit.com${post.getAttribute('data-permalink')}`,
+            link: titleElement.href || `https://www.reddit.com${permalink}`,
             numberOfComments: commentsElement ? parseInt(commentsElement.textContent.match(/\d+/)?.[0] || '0') : 0,
             flair: null,
-            upVotes: scoreElement ? parseInt(scoreElement.textContent) : 0,
+            upVotes: scoreElement ? parseInt(scoreElement.textContent.replace(/[^\d-]/g, '') || '0') : 0,
             upVoteRatio: 0,
             isVideo: false,
-            isAd: false,
-            over18: post.classList.contains('over18'),
+            isAd: post.classList.contains('promoted') || false,
+            over18: post.classList.contains('over18') || false,
             thumbnailUrl: null,
             imageUrls: [],
             createdAt: new Date().toISOString(),
@@ -93,8 +139,34 @@ async function searchRedditWithPuppeteer(keyword, options = {}) {
         }
       }
       
+      console.log(`Extracted ${results.length} posts`);
       return results;
     }, limit);
+
+    // If no posts found, get page HTML for debugging
+    if (posts.length === 0) {
+      console.log('⚠️ No posts found. Checking page content...');
+      const bodyText = await page.evaluate(() => {
+        const selectors = [
+          '.search-result-link',
+          '.thing.link',
+          '.search-result',
+          '.search-result-body',
+          '#siteTable .thing'
+        ];
+        
+        const found = {};
+        selectors.forEach(sel => {
+          found[sel] = document.querySelectorAll(sel).length;
+        });
+        
+        return {
+          selectors: found,
+          bodySnippet: document.body.innerText.substring(0, 500)
+        };
+      });
+      console.log('Page analysis:', JSON.stringify(bodyText, null, 2));
+    }
 
     console.log(`✅ Found ${posts.length} posts via Puppeteer`);
 

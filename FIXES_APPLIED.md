@@ -16,50 +16,14 @@
 
 ---
 
-### 2. Twitter Automated Login Password Field Detection (FIXED)
-**Problem:** The automated Twitter login was failing because it couldn't find the password field after entering the username.
-
-**Root Cause:** 
-- Insufficient wait time after clicking "Next" button
-- No retry logic for finding the password field
-- Twitter's dynamic page loading requires more patience
-
-**Solution:** 
-- Increased wait time from 2 seconds to 3 seconds
-- Added retry loop (5 attempts with 2-second delays between attempts)
-- Added explicit `waitForSelector` with timeout handling
-- Added error handling with `.catch()` to prevent crashes
-- Added screenshot capture on failure for debugging
-- Better visibility and type checking for password fields
-
-**Files Modified:**
-- `/app/twitter_bot.js` (lines 230-279)
-
----
-
-### 3. Port 4000 EADDRINUSE Error (FIXED)
-**Problem:** When Twitter authentication failed, subsequent attempts crashed with "Error: listen EADDRINUSE: address already in use :::4000"
-
-**Root Cause:** 
-- The OAuth callback server on port 4000 was not being properly closed when authentication failed
-- No tracking of server instance across function calls
-- No cleanup in error paths
-
-**Solution:**
-- Added global variable `oauthCallbackServer` to track server instance
-- Added server cleanup before starting new authentication attempt
-- Added server cleanup in error catch blocks
-- Added error handling for EADDRINUSE in server startup
-- Properly reject Promise when port is already in use
-
-**Files Modified:**
-- `/app/twitter_bot.js` (lines 26, 456-518, 522-556)
-
----
-
 ## Additional Issues Noted (Not Fixed)
 
-### Reddit Search API Blocking
+### 1. Twitter Authentication Errors (NOT FIXED - Not in Use)
+**Status:** Your n8n workflow is calling `/api/twitter/comment` which uses `twitter_bot.js` with OAuth API.
+
+**Note:** If you're not using Twitter API (and using Puppeteer instead), update your n8n workflow to call `/api/twitter2/comment` instead.
+
+### 2. Reddit Search API Blocking
 **Status:** Expected behavior, already has fallback
 
 The logs show:
@@ -85,16 +49,6 @@ Response Status: 403 Blocked
    - Try posting a comment to verify the 401 error is resolved
    - Check if the User-Agent fix allows successful token refresh
 
-2. **Test Twitter Login:**
-   - Trigger a Twitter comment request
-   - Monitor logs for password field detection
-   - Check if screenshots are created at `/app/twitter-login-error.png` if it fails
-
-3. **Test Port Cleanup:**
-   - Trigger two consecutive failed Twitter authentications
-   - Verify no EADDRINUSE error occurs on the second attempt
-   - Check logs for "Closing existing OAuth callback server" messages
-
 ---
 
 ## Environment Variables to Verify
@@ -107,16 +61,6 @@ REDDIT_CLIENT_ID=your_client_id
 REDDIT_CLIENT_SECRET=your_client_secret
 REDDIT_USERNAME=yadidiahhumaiae
 REDDIT_PASSWORD=your_password
-
-# Twitter/X
-X_CLIENT_ID=your_client_id
-X_CLIENT_SECRET=your_client_secret
-TWITTER_USER=your_email_or_username
-TWITTER_PASS=your_password
-TWITTER_USERNAME=your_twitter_handle
-X_USER=your_email_or_username
-X_PASS=your_password
-X_USERNAME=your_twitter_handle
 ```
 
 ---
@@ -132,7 +76,7 @@ X_USERNAME=your_twitter_handle
 
 2. Test the Reddit comment functionality
 
-3. Test the Twitter comment functionality
+3. If using Twitter, make sure your n8n workflow calls `/api/twitter2/comment` (Puppeteer) instead of `/api/twitter/comment` (OAuth API)
 
 4. Monitor logs for any remaining issues
 
@@ -140,6 +84,5 @@ X_USERNAME=your_twitter_handle
 
 ## Files Modified Summary
 
-- `/app/reddit_bot.js` - Fixed User-Agent header
-- `/app/twitter_bot.js` - Fixed password detection and port cleanup
+- `/app/reddit_bot.js` - Fixed User-Agent header to use actual Reddit username
 

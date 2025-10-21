@@ -75,15 +75,15 @@ async function refreshAccessToken() {
     console.log('Grant Type: password');
     console.log('Request Body Keys:', Array.from(requestBody.keys()));
 
-    const response = await fetch("https://www.reddit.com/api/v1/access_token", {
-      method: "POST",
-      headers: {
-        "User-Agent": "MyRedditBot/1.0 by u/Commercial_Term_8918",
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: requestBody,
-    });
+  const response = await fetch("https://www.reddit.com/api/v1/access_token", {
+    method: "POST",
+    headers: {
+      "User-Agent": `RedditBot/2.0 (by /u/${username})`,
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: requestBody,
+  });
 
     console.log('Response Status:', response.status, response.statusText);
     console.log('Response Headers:', Object.fromEntries(response.headers.entries()));
@@ -150,7 +150,7 @@ async function postComment({ thingId, text, isRetry = false }) {
     method: "POST",
     headers: {
       "Authorization": `bearer ${accessToken}`,
-      "User-Agent": "MyRedditBot/1.0 by u/Commercial_Term_8918",
+      "User-Agent": `RedditBot/2.0 (by /u/${process.env.REDDIT_USERNAME})`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: formData.toString(),

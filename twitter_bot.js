@@ -22,6 +22,9 @@ const TWITTER_PROFILE_PATH = path.join(__dirname, "twitter_profile");
 // Track if we're currently re-authenticating to prevent infinite loops
 let isReauthenticating = false;
 
+// Track the OAuth callback server instance for cleanup
+let oauthCallbackServer = null;
+
 const OAUTH_PORT = 4000; // Unified OAuth port for all services
 const CLIENT_ID = process.env.X_CLIENT_ID;          // from developer portal
 const CLIENT_SECRET = process.env.X_CLIENT_SECRET;  // optional, for confidential clients
@@ -229,7 +232,7 @@ async function automateTwitterLogin(page) {
   
   // Step 2: Enter password
   console.log("Looking for password field...");
-  await delay(2000);
+  await delay(3000);
   
   const passwordSelectors = [
     'input[name="password"]',
@@ -238,28 +241,44 @@ async function automateTwitterLogin(page) {
   ];
   
   let passwordElement = null;
-  for (const selector of passwordSelectors) {
-    try {
-      const elements = await page.$$(selector);
-      if (elements.length > 0) {
-        for (const el of elements) {
-          const isVisible = await el.isVisible();
-          const isPassword = await el.evaluate(node => node.type === 'password');
-          if (isVisible && isPassword) {
-            passwordElement = el;
-            console.log(`Found password field with selector: ${selector}`);
-            break;
+  let attempts = 0;
+  const maxAttempts = 5;
+  
+  while (!passwordElement && attempts < maxAttempts) {
+    for (const selector of passwordSelectors) {
+      try {
+        await page.waitForSelector(selector, { timeout: 3000, visible: true }).catch(() => {});
+        const elements = await page.$$(selector);
+        if (elements.length > 0) {
+          for (const el of elements) {
+            const isVisible = await el.isVisible().catch(() => false);
+            if (isVisible) {
+              const isPassword = await el.evaluate(node => node.type === 'password').catch(() => false);
+              if (isPassword) {
+                passwordElement = el;
+                console.log(`Found password field with selector: ${selector}`);
+                break;
+              }
+            }
           }
+          if (passwordElement) break;
         }
-        if (passwordElement) break;
+      } catch (e) {
+        continue;
       }
-    } catch (e) {
-      continue;
+    }
+    
+    if (!passwordElement) {
+      attempts++;
+      console.log(`Password field not found, attempt ${attempts}/${maxAttempts}, waiting...`);
+      await delay(2000);
     }
   }
   
   if (!passwordElement) {
-    throw new Error('Password field not found');
+    console.log("Taking screenshot for debugging...");
+    await page.screenshot({ path: '/app/twitter-login-error.png', fullPage: true }).catch(e => console.log("Screenshot failed:", e.message));
+    throw new Error('Password field not found after multiple attempts');
   }
   
   console.log("Entering password...");
@@ -434,12 +453,25 @@ async function triggerAutomatedReauth() {
   console.log("🔄 Token is invalid. Starting automated re-authentication...");
 
   try {
+    // Close any existing OAuth server first
+    if (oauthCallbackServer) {
+      console.log("🧹 Closing existing OAuth callback server...");
+      await new Promise((resolve) => {
+        oauthCallbackServer.close(() => {
+          console.log("✅ Previous OAuth server closed");
+          oauthCallbackServer = null;
+          resolve();
+        });
+      });
+    }
+    
     // Create new PKCE challenge
     const pkce = createPkce();
     const authUrl = buildAuthUrl(pkce);
     
     // Start auth server in background
     const server = await startAuthServerForReauth();
+    oauthCallbackServer = server;
     
     // Wait a bit for server to be ready
     await delay(2000);
@@ -455,7 +487,10 @@ async function triggerAutomatedReauth() {
       const tokens = readJSON(TOKENS_PATH);
       if (tokens && tokens.access_token) {
         console.log("✅ New tokens obtained successfully!");
-        server.close();
+        if (oauthCallbackServer) {
+          oauthCallbackServer.close();
+          oauthCallbackServer = null;
+        }
         isReauthenticating = false;
         return true;
       }
@@ -466,6 +501,18 @@ async function triggerAutomatedReauth() {
     
   } catch (error) {
     console.error("❌ Automated re-authentication failed:", error.message);
+    
+    // Clean up server on error
+    if (oauthCallbackServer) {
+      console.log("🧹 Cleaning up OAuth server after error...");
+      await new Promise((resolve) => {
+        oauthCallbackServer.close(() => {
+          oauthCallbackServer = null;
+          resolve();
+        });
+      });
+    }
+    
     isReauthenticating = false;
     throw error;
   }
@@ -473,7 +520,7 @@ async function triggerAutomatedReauth() {
 
 // --- Start Auth Server for Re-authentication (non-blocking) ---
 async function startAuthServerForReauth() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const app = express();
     
     app.get("/twitter/callback", async (req, res) => {
@@ -494,6 +541,16 @@ async function startAuthServerForReauth() {
     const server = app.listen(OAUTH_PORT, () => {
       console.log(`✅ OAuth callback server started on port ${OAUTH_PORT}`);
       resolve(server);
+    });
+    
+    // Handle port already in use error
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${OAUTH_PORT} is already in use`);
+        reject(new Error(`Port ${OAUTH_PORT} is already in use. Please wait a moment and try again.`));
+      } else {
+        reject(err);
+      }
     });
   });
 }

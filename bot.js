@@ -135,8 +135,7 @@ async function isLoggedInToLinkedIn(page) {
     if (hasSessionCookie) {
       console.log("✓ Session cookies found");
     } else {
-      console.log("✗ No session cookies found");
-      return false;
+      console.log("✗ No session cookies found (but will check other methods)");
     }
     
     // Method 2: Navigate to feed and check URL

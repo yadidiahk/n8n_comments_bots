@@ -142,3 +142,4 @@ See `DISK_SPACE_ISSUE.md` for detailed solutions including:
 - How to increase GCP VM disk size
 - Setting up automatic cleanup (cron jobs) - see `AUTOMATION_GUIDE.md`
 - Disk space monitoring
+
